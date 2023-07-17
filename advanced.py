@@ -27,17 +27,12 @@ class SubmitAndLeaveAgent:
         pass
 
     def get_action(self, obs : np.ndarray) -> int:
-        # levave the order where it is 
+        # at time 0 place order at desired level 
         if obs[0] == 0:
             return self.level
-        # if level of order is >= desired level, move it to the desired level
-        # elif obs[0] > self.level:
-            # return self.level
         else:
         # otherwise leave the order where it is 
             return obs[1] 
-
-
 
 class Market(gym.Env):
 
@@ -73,7 +68,7 @@ class Market(gym.Env):
         
         # self.initial_shape = np.ones(30)*500
 
-        shape = np.load('/Users/weim/projects/lob_simulator/cont_model/stationary_shape.npz')
+        shape = np.load('/u/weim/lob/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
 
@@ -86,7 +81,8 @@ class Market(gym.Env):
         # observation space = [0,1,2]
         # action space = [-1,0,1,2]
         self.initial_level = config['initial_level']
-        self.observation_space = Tuple( (Box(0, 1), Discrete(self.initial_level+2, start=-1)))
+        # time, level, shortfall, queue position  
+        self.observation_space = Tuple( ( Discrete(11), Discrete(self.initial_level+2, start=-1), Discrete(7, start=-3), Box(0,np.inf), Box(0,1)))
         self.action_space = Discrete(self.initial_level+2, start=-1)
 
 
@@ -291,8 +287,8 @@ class Market(gym.Env):
         self.order_map[order_id]['volume'] = order['volume']
         return 'modification', order_id
 
- 
     ## simulation related methods
+
     def initialize_book(self):  
         # TODO: 30 as a parameter 
         # order_list = []
@@ -376,7 +372,7 @@ class Market(gym.Env):
             if side == 'bid':
                 probability = bid_volumes*self.cancel_intensities
                 probability = probability/np.sum(probability)
-                level = self.np_random.choice(np.arange(1,30+1,1), p=probability) 
+                level = self.np_random.choice(np.arange(1,L+1,1), p=probability) 
                 price = best_ask - level
             volume = 0 
             while volume == 0:
@@ -388,7 +384,6 @@ class Market(gym.Env):
             return self.process_order(order)
         else:
             return self.find_orders_to_cancel(side=order['side'], cancel_volume=order['volume'], price=order['price'])
-
 
     def find_orders_to_cancel(self, side, cancel_volume, price):
         # TODO: order volumes should always be integer 
@@ -438,15 +433,18 @@ class Market(gym.Env):
 
     ## analytics methods 
 
-    def find_queue_position(self, order_id):
-        order = self.order_map[order_id]
-        level = self.price_map[order['side']][order['price']]
+    def find_queue_position(self, order_id, all_levels=True):        
+        # implement all levels option 
+        order = self.order_map[order_id]        
+        side = order['side']
         queue_position = 0
-        for id in level:
-            if id == order_id:
-                break
-            queue_position += self.order_map[id]['volume']
-        return queue_position 
+        for price in self.price_map[side]:
+            level = self.price_map[side][price]
+            for id in level:
+                if id == order_id:
+                    return queue_position
+                queue_position += self.order_map[id]['volume']
+        raise ValueError('order_id not found on this side of the book')
 
     def get_best_price(self, side):
         return self.price_map[side].keys()[0]
@@ -491,9 +489,8 @@ class Market(gym.Env):
         return best_price, best_volume 
 
 
-
-
     ## gym methods 
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
@@ -550,6 +547,7 @@ class Market(gym.Env):
             reward = out[2]
             terminated = True     
             level = -1    
+            self.active_order = None 
             return self._get_obs(time, level), self._get_reward(reward), terminated, truncated, {}
         
         else:
@@ -569,6 +567,7 @@ class Market(gym.Env):
         for _ in range(100):
             if self.log:
                 self.logging()
+
             # transition to next state by generatating a random order 
             out = self.generate_order() 
             self.time += 1
@@ -576,12 +575,14 @@ class Market(gym.Env):
             if self.log:
                 self.log_trade(out)
 
+            # assert self.time <= self.total_n_steps
             # cancel far out orders
             # self.cancel_far_out_orders()
 
             # check if limit order of agent is filled
             if out[0] == 'market':
-                if out[1]['agent']:                
+                if out[1]['agent']:
+                    self.active_order = None                
                     reward = out[1]['agent'][0]['price']
                     level = -1
                     terminated = True        
@@ -589,11 +590,13 @@ class Market(gym.Env):
 
             # handle terminal time 
             if self.time == self.total_n_steps:
+                self.active_order = None
                 truncated = terminated = True
                 reward = self.get_best_price('bid') 
                 level = -1
                 return self._get_obs(time, level), self._get_reward(reward), terminated, truncated, {}
         
+        # order not filled yet 
         # compute observation 
         agent_order = self.order_map[self.active_order]
         level = agent_order['price'] - self.get_best_price(side='ask')
@@ -610,8 +613,34 @@ class Market(gym.Env):
         return self._get_obs(time, level), reward, terminated, truncated, {}
     
     def _get_obs(self, time, level):
-        time = np.array([time], dtype=np.float32)
-        return (time, level)
+        # include the current shortfall 
+        shortfall = self.get_best_price('bid')  - self.initial_ask
+        shortfall = max(-3, min(3, shortfall))
+        # include queue position of order
+        if self.active_order == None:
+            queue_position = 0 
+        else:
+            queue_position = self.find_queue_position(self.active_order)/4000
+        #
+        time = self.total_n_steps*time  
+        time = np.rint(time/100).astype(np.int32)
+        # time = np.array([time], dtype=np.float32)
+        queue_position = np.array([queue_position], dtype=np.float32)
+        # include order book imbalance 
+        bid_volume = self._get_best_volume(side='bid')
+        ask_volume = self._get_best_volume(side='ask')
+        imbalance = ask_volume/(bid_volume+ask_volume)
+        imbalance = np.array([imbalance], dtype=np.float32)                
+        return (time, level, shortfall, queue_position, imbalance)
+
+    def _get_best_volume(self, side):
+        best_price = self.get_best_price(side=side)
+        level = self.price_map[side][best_price]
+        v = 0 
+        for order_id in level:
+            order = self.order_map[order_id]
+            v += order['volume']
+        return v 
 
     ## logging 
     def logging(self,order=None):
@@ -726,48 +755,65 @@ if __name__ == '__main__':
     # - cancellation of far out orders makes difference in time 
     import time 
     start = time.time()
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':10, 'initial_level': 2}
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':8, 'initial_level': 2}
     Market = Market(config=config)
-    assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
-    assert (np.array([0.5], dtype=np.float32), Market.initial_level) in Market.observation_space
-    assert (np.array([0.5], dtype=np.float32), Market.initial_level+1) not in Market.observation_space
+    # assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
+    # assert (np.array([0.5], dtype=np.float32), Market.initial_level) in Market.observation_space
+    # assert (np.array([0.5], dtype=np.float32), Market.initial_level+1) not in Market.observation_space
     rewards = []
-    for n in range(100):
+    times = []
+    shortfalls = []
+    for n in range(2000):
         if n%100 == 0:
             print(f'episode {n}')
-        Agent = SubmitAndLeaveAgent(level=2)
+        Agent = SubmitAndLeaveAgent(level=0)
         observation, _ = Market.reset()
         observations = []
         actions = [] 
         q = []
         l = []
-        for n in range(Market.total_n_steps+1):
-            action = Agent.get_action(observation)
+        terminated = truncated = False 
+        while not terminated and not truncated: 
+            # action = Agent.get_action(observation)
+            action = 0
             # action = Market.action_space.sample()
+            # action = 2
             assert action in Market.action_space
             active_order = Market.active_order
-            q.append(Market.find_queue_position(active_order))
             observation, reward, terminated, truncated, info = Market.step(action)
+            q.append(observation[3])
             l.append(observation[1])
+            shortfalls.append(observation[2])
+            times.append(Market.time)
             assert observation in Market.observation_space
             observations.append(observation)
-            if terminated or truncated:
-                rewards.append(reward)
-                break 
+        rewards.append(reward)
 
     elapsed = time.time()-start
     print(f'time elapsed in seconds: {elapsed}')
 
+    # print(shortfalls)
+    # print(times)
+    plt.figure()
     Market.plot_prices()
-    plt.figure()
-    plt.plot(q)
-    plt.figure()
-    plt.plot(l)
-    print(f'average reward is {np.mean(rewards)}')
-    print('done')
-    plt.show()
+    plt.savefig('prices.png')
+    # plt.savefig('prices.png')
+    # plt.plot(q)
+    # plt.figure()
+    # plt.plot(l)
+    # plt.savefig('queue.png')
 
+    print(f'average reward is {np.mean(rewards)}')
+    print(f'max reward is {np.max(rewards)}')
+    print(f'min reward is {np.min(rewards)}')
+    print('done')
+
+    rewards = np.array(rewards)
+    np.save('rewards_bench', rewards)
     
+    
+
+
 
 
 
