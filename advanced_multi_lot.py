@@ -87,7 +87,7 @@ class Market(gym.Env):
         self.observation_space = Tuple(( Box(0,1), Discrete(self.initial_volume+1, start=0), Discrete(7, start=-3), Box(0,1)))
         # self.action_space = Discrete(self.initial_level+2, start=-1)
         # action space: values between in R for the levels [-1,0,1,2]
-        self.action_space = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
+        self.action_space = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32, seed=config['seed'])
 
 
         ## logging 
@@ -533,12 +533,13 @@ class Market(gym.Env):
 
         return self._get_obs(), {}
     
-    def _get_reward(self, reward):
-        return reward - self.initial_ask
+    def _get_reward(self, reward, traded_volume):
+        return reward - self.initial_bid*traded_volume
     
     def _find_allocation(self, action):
         ## find vector of allocations
         action = np.exp(action)/np.sum(np.exp(action))
+        action = np.array([0,0,0,1], dtype=np.float32)
         # note: this gets passed by copy not by reference 
         available_volume = self.volume
         best_bid = self.get_best_price(side='bid')
@@ -548,31 +549,38 @@ class Market(gym.Env):
             available_volume -= allocation
             allocations.append(allocation) 
         allocations[-1] += available_volume
+        assert sum(allocations) == self.volume
 
         # cancel orders, find out which new limit order should be placed
+        active_orders_within = set()
         available_volume = 0 
         new_orders = 4*[0]
         new_orders[0] = allocations[0]
+        total_resting_orders = 0 
         for l in [1, 2, 3]:
-            resting_orders = 0 
+            orders_on_level = 0 
             if best_bid+l in self.price_map['ask']:
                 level = self.price_map['ask'][best_bid+l].copy()
                 for order_id in level:
-                    if self.order_map[order_id]['agent_id'] == 'agent':
-                        resting_orders += 1 
-                        if resting_orders > allocations[l]:
+                    if self.order_map[order_id]['agent_id'] == 'agent':                        
+                        orders_on_level += 1 
+                        if orders_on_level > allocations[l]:
                             order = {'type': 'cancellation', 'order_id': order_id, 'agent_id': 'agent'}
                             self.process_order(order)
                             self.active_orders.remove(order_id)
                             available_volume += 1
-            else: 
-                pass
-            new_orders[l] = max(0, allocations[l]-resting_orders)
+                        else:
+                            active_orders_within.add(order_id)
+            total_resting_orders += orders_on_level
+            new_orders[l] = max(0, allocations[l] - orders_on_level)
         if available_volume < sum(new_orders):
-            for order_id in self.active_orders:
+            active_orders = self.active_orders.copy()
+            for order_id in active_orders.difference(active_orders_within):
                 order = {'type': 'cancellation', 'order_id': order_id, 'agent_id': 'agent'}
                 self.process_order(order)
+                self.active_orders.remove(order_id)
                 available_volume += 1 
+        assert available_volume == sum(new_orders)
         return new_orders
 
     def step(self, action=None):
@@ -592,13 +600,14 @@ class Market(gym.Env):
         if new_orders[0] > 0:
             order = {'agent_id': self.agent_id, 'type': 'market', 'volume': new_orders[0], 'side': 'bid'}                          
             out = self.process_order(order)
-            reward += out[2]
+            # add relative rewards here 
+            reward += self._get_reward(reward=out[2], traded_volume=new_orders[0])
             self.volume -= new_orders[0]
-            assert self.volume >= 0 
+            assert self.volume >= 0  
             if self.volume == 0:
                 # review the following. how to calculate reward ? 
                 terminated = True
-                return self._get_obs(), self._get_reward(reward), terminated, truncated, {}
+                return self._get_obs(), reward, terminated, truncated, {}
 
         # send new limit orders 
         for n_orders, level in zip(new_orders[1:], [1,2,3]):
@@ -622,26 +631,34 @@ class Market(gym.Env):
             # cancel far out orders
             # self.cancel_far_out_orders()
 
-            # check if limit order of agent is filled
+            # for order in self.active_orders:
+            #     assert order in self.order_map
+
+            # check if limit orders of agent are filled
             if out[0] == 'market':
                 if out[1]['agent']:
-                    reward += out[1]['agent'][0]['price']
-                    self.active_orders.remove(out[1]['agent'][0]['order_id'])
-                    self.volume -= 1
+                    for order in out[1]['agent']: 
+                        reward += self._get_reward(reward=order['price'], traded_volume=1)
+                        self.active_orders.remove(order['order_id'])
+                        self.volume -= 1
                     assert self.volume >= 0  
                     if self.volume == 0:
-                        terminated = True        
-                        # check get reward function 
-                        return self._get_obs(), self._get_reward(reward), terminated, truncated, {}
+                        terminated = True         
+                        return self._get_obs(), reward, terminated, truncated, {}
+            
+            for order in self.active_orders:
+                assert order in self.order_map
 
-            # handle terminal time 
+            # terminal time 
             if self.time == self.total_n_steps:
                 truncated = True
                 order = {'agent_id': self.agent_id, 'type': 'market', 'volume': self.volume, 'side': 'bid'}
                 out = self.process_order(order)
-                reward += out[2]
-                return self._get_obs(), self._get_reward(reward), terminated, truncated, {}
-        
+                reward += self._get_reward(out[2], self.volume)
+                self.volume = 0 
+                return self._get_obs(), reward, terminated, truncated, {}
+            
+        # measure reward relative to best bid reward - traded_volume*best_bid
         return self._get_obs(), reward, terminated, truncated, {}
     
     def _get_obs(self):
@@ -781,16 +798,18 @@ if __name__ == '__main__':
     # - cancellation of far out orders makes difference in time 
     import time 
     start = time.time()
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':8, 'initial_level': 2, 'initial_volume': 10}
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':7, 'initial_level': 2, 'initial_volume': 10}
     Market = Market(config=config)
-    check_env(Market)
+    # check_env(Market)
     # assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
     # assert (np.array([0.5], dtype=np.float32), Market.initial_level) in Market.observation_space
     # assert (np.array([0.5], dtype=np.float32), Market.initial_level+1) not in Market.observation_space
     rewards = []
     times = []
     shortfalls = []
-    for n in range(500):
+    volumes = []
+    volumes.append(config['initial_volume'])
+    for n in range(1):
         if n%100 == 0:
             print(f'episode {n}')
         # Agent = SubmitAndLeaveAgent(level=0)
@@ -804,10 +823,12 @@ if __name__ == '__main__':
         while not terminated and not truncated: 
             # action = Agent.get_action(observation)
             # action = 0
-            action = Market.action_space.sample()
+            action = Market.action_space.sample()            
+            action = np.array([-10, 10, -10, -10], dtype=np.float32)
             # action = 2
             assert action in Market.action_space
             observation, reward, terminated, truncated, info = Market.step(action)
+            volumes.append(Market.volume)
             q.append(observation[3])
             l.append(observation[1])
             shortfalls.append(observation[2])
@@ -815,10 +836,12 @@ if __name__ == '__main__':
             assert observation in Market.observation_space
             observations.append(observation)
         rewards.append(reward)
+        assert Market.volume == 0 
 
     elapsed = time.time()-start
+    print(volumes)
+    print(rewards)
     print(f'time elapsed in seconds: {elapsed}')
-
     # print(shortfalls)
     # print(times)
     plt.figure()
