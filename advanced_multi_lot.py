@@ -71,7 +71,7 @@ class Market(gym.Env):
         
         # self.initial_shape = np.ones(30)*500
 
-        shape = np.load('/u/weim/lob/stationary_shape.npz')
+        shape = np.load('/Users/weim/projects/lob_simulator/cont_model/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
 
@@ -84,10 +84,12 @@ class Market(gym.Env):
         # observation space = [0,1,2]
         self.initial_level = config['initial_level']
         # time, volume, price drift from -3 to 3, imbalance 
-        self.observation_space = Tuple(( Box(0,1), Discrete(self.initial_volume+1, start=0), Discrete(7, start=-3), Box(0,1)))
+        self.observation_space = Tuple(( Box(0,1), Discrete(self.initial_volume+1, start=0), Discrete(7), Box(0,1)))
+        # time, volume, price drift, imbalance 
+        self.observation_space = Box(low=0, high=1, shape=(4,)) 
         # self.action_space = Discrete(self.initial_level+2, start=-1)
         # action space: values between in R for the levels [-1,0,1,2]
-        self.action_space = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32, seed=config['seed'])
+        self.action_space = Box(low=-10, high=10, shape=(4,), dtype=np.float32, seed=config['seed'])
 
 
         ## logging 
@@ -506,6 +508,9 @@ class Market(gym.Env):
         self.initial_bid = self.get_best_price(side='bid')
         self.active_orders = set()
 
+        # reset volume 
+        self.volume = self.initial_volume
+
         # submit 10 limit orders to the second ask level in the book 
         # place orders as single lots 
         best_ask = self.get_best_price(side='ask')
@@ -665,15 +670,17 @@ class Market(gym.Env):
         '''
         - returns: (time, volume, price, imbalance)
         '''
-        price_drift = self.get_best_price('bid')  - self.initial_bid 
-        price_drift = max(-3, min(3, price_drift))
+        time = self.time/self.total_n_steps
+        volume = self.volume/self.initial_volume
+        price_drift = (self.get_best_price('bid')  - self.initial_bid)/self.initial_bid
+        price_drift = max(0, min(1, price_drift))
         # time = self.total_n_steps*time  
         # time = np.rint(time/100).astype(np.int32)
-        time = self.time/self.total_n_steps
         # imbalance 
         bid_volume = self._get_best_volume(side='bid')
         ask_volume = self._get_best_volume(side='ask')
         imbalance = ask_volume/(bid_volume+ask_volume)
+        return np.array([time, volume, price_drift, imbalance], dtype=np.float32)
         return (np.array([time], dtype=np.float32), self.volume, price_drift, np.array([imbalance], dtype=np.float32))
 
     def _get_best_volume(self, side):
@@ -798,7 +805,7 @@ if __name__ == '__main__':
     # - cancellation of far out orders makes difference in time 
     import time 
     start = time.time()
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':7, 'initial_level': 2, 'initial_volume': 10}
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10}
     Market = Market(config=config)
     # check_env(Market)
     # assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
@@ -809,7 +816,8 @@ if __name__ == '__main__':
     shortfalls = []
     volumes = []
     volumes.append(config['initial_volume'])
-    for n in range(1):
+    for n in range(10):
+        # print(f'episode {n}')
         if n%100 == 0:
             print(f'episode {n}')
         # Agent = SubmitAndLeaveAgent(level=0)
@@ -828,6 +836,8 @@ if __name__ == '__main__':
             # action = 2
             assert action in Market.action_space
             observation, reward, terminated, truncated, info = Market.step(action)
+            # (time, volume, price, imbalance)            
+            print(f'observation is {observation}')
             volumes.append(Market.volume)
             q.append(observation[3])
             l.append(observation[1])
