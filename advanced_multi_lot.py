@@ -544,7 +544,7 @@ class Market(gym.Env):
     def _find_allocation(self, action):
         ## find vector of allocations
         action = np.exp(action)/np.sum(np.exp(action))
-        action = np.array([0,0,0,1], dtype=np.float32)
+        # action = np.array([0,0,0,1], dtype=np.float32)
         # note: this gets passed by copy not by reference 
         available_volume = self.volume
         best_bid = self.get_best_price(side='bid')
