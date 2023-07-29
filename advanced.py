@@ -68,7 +68,7 @@ class Market(gym.Env):
         
         # self.initial_shape = np.ones(30)*500
 
-        shape = np.load('/u/weim/lob/stationary_shape.npz')
+        shape = np.load('/Users/weim/projects/lob_simulator/cont_model/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
 
