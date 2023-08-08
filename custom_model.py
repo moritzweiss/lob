@@ -9,6 +9,11 @@ from ray.rllib.utils.framework import try_import_torch
 from ray.rllib.utils.typing import Dict, TensorType, List, ModelConfigDict
 from ray.rllib.utils.deprecation import deprecation_warning
 from ray.util import log_once
+from ray.rllib.models.action_dist import ActionDistribution
+from typing import Optional
+from ray.rllib.utils.typing import TensorType, List, Union, Tuple, ModelConfigDict
+from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
+from torch.nn import Softplus
 
 torch, nn = try_import_torch()
 
@@ -25,6 +30,7 @@ class CustomTorchModel(TorchModelV2, nn.Module):
         num_outputs: int,
         model_config: ModelConfigDict,
         name: str,
+        **customized_model_kwargs
     ):
         TorchModelV2.__init__(
             self, obs_space, action_space, num_outputs, model_config, name
@@ -169,3 +175,50 @@ class CustomTorchModel(TorchModelV2, nn.Module):
         else:
             out = self._value_branch(self._features).squeeze(1)
         return out
+    
+
+class TorchDirichlet(TorchDistributionWrapper):
+    """Dirichlet distribution for continuous actions that are between
+    [0,1] and sum to 1.
+
+    e.g. actions that represent resource allocation."""
+
+    def __init__(self, inputs, model):
+        """Input is a tensor of logits. The exponential of logits is used to
+        parametrize the Dirichlet distribution as all parameters need to be
+        positive. An arbitrary small epsilon is added to the concentration
+        parameters to be zero due to numerical error.
+
+        See issue #4440 for more details.
+        """
+        self.epsilon = torch.tensor(1e-7).to(inputs.device)
+        layer = Softplus()
+        concentration = layer(inputs) + 1.0
+        self.dist = torch.distributions.dirichlet.Dirichlet(
+            concentration=concentration,
+            validate_args=True,
+        )
+        super().__init__(concentration, model)
+
+    @override(ActionDistribution)
+    def deterministic_sample(self) -> TensorType:
+        self.last_sample = nn.functional.softmax(self.dist.concentration, dim=-1)
+        return self.last_sample
+
+    @override(ActionDistribution)
+    def logp(self, x):
+        # Support of Dirichlet are positive real numbers. x is already
+        # an array of positive numbers, but we clip to avoid zeros due to
+        # numerical errors.
+        x = torch.max(x, self.epsilon)
+        x = x / torch.sum(x, dim=-1, keepdim=True)
+        return self.dist.log_prob(x)
+
+    @override(ActionDistribution)
+    def entropy(self):
+        return self.dist.entropy()
+
+    @staticmethod
+    @override(ActionDistribution)
+    def required_model_output_shape(action_space, model_config):
+        return np.prod(action_space.shape, dtype=np.int32)
