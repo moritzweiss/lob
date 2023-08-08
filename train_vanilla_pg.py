@@ -7,8 +7,14 @@ import ray
 from ray import tune
 from ray.rllib.models import ModelCatalog
 from custom_model import CustomTorchModel
+# from custom_model import TorchDirichlet
 import copy 
 from ray.rllib.models import MODEL_DEFAULTS
+
+# 
+from ray.rllib.utils.spaces.simplex import Simplex
+from ray.rllib.models.torch.torch_action_dist import TorchDirichlet
+
 
 # ray.init(local_mode=True)
 
@@ -23,35 +29,38 @@ custom_config = copy.deepcopy(MODEL_DEFAULTS)
 custom_config = {}
 custom_config['test'] = 1
 
+ModelCatalog.register_custom_action_dist("my_dist", TorchDirichlet)
+
 model_config = { # By default, the MODEL_DEFAULTS dict above will be used.
         "custom_model": "my_torch_model",
-         "custom_model_config": custom_config} 
+         "custom_model_config": custom_config,
+         "custom_action_dist": "my_dist"} 
 
-config = (PGConfig().rollouts(num_rollout_workers=0, create_env_on_local_worker=False, batch_mode='complete_episodes', observation_filter='NoFilter')
+config = (PGConfig().rollouts(num_rollout_workers=2, create_env_on_local_worker=False, batch_mode='complete_episodes', observation_filter='NoFilter')
         .framework('torch')
-        .resources(num_gpus=0)
+        .resources(num_gpus=1)
         .environment(env=Market, env_config=env_config)
         .training(train_batch_size=128, model=model_config, lr=1e-4)
         # .training(train_batch_size=4000, gamma=1, lr = tune.grid_search([1e-4, 1e-3]))
         .debugging(fake_sampler=False)
         ) 
 
-algo = config.build()
-algo.train()
+# algo = config.build()
+# algo.train()
 # algo.evaluate()
 
+ray.init(num_cpus=8, num_gpus=1, local_mode=False)
+tuner = tune.Tuner(
+    "PG",
+    run_config=air.RunConfig(
+        stop={"training_iteration": 10}, storage_path = '/u/weim/lob/results',  name = 'newnew', 
+        checkpoint_config=air.CheckpointConfig(checkpoint_frequency=5, checkpoint_at_end=True, checkpoint_score_order='max', 
+                                               checkpoint_score_attribute='episode_reward_mean')
+    ),
+    param_space=config,
+)
 
-# tuner = tune.Tuner(
-#     "PG",
-#     run_config=air.RunConfig(
-#         stop={"training_iteration": 50}, storage_path = '/Users/weim/projects/lob_simulator/cont_model/results',  name = 'test', 
-#         checkpoint_config=air.CheckpointConfig(checkpoint_frequency=5, checkpoint_at_end=True, checkpoint_score_order='max', 
-#                                                checkpoint_score_attribute='episode_reward_mean')
-#     ),
-#     param_space=config,
-# )
-
-# tuner.fit()
+tuner.fit()
 
 
 
