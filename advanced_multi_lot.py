@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import gymnasium as gym 
 from gymnasium.utils.env_checker import check_env
+from ray.rllib.utils.spaces.simplex import Simplex
 
 
 class PeggingAgent:
@@ -71,7 +72,7 @@ class Market(gym.Env):
         
         # self.initial_shape = np.ones(30)*500
 
-        shape = np.load('/Users/weim/projects/lob_simulator/cont_model/stationary_shape.npz')
+        shape = np.load('/u/weim/lob/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
 
@@ -85,11 +86,14 @@ class Market(gym.Env):
         self.initial_level = config['initial_level']
         # time, volume, price drift from -3 to 3, imbalance 
         self.observation_space = Tuple(( Box(0,1), Discrete(self.initial_volume+1, start=0), Discrete(7), Box(0,1)))
-        # time, volume, price drift, imbalance 
-        self.observation_space = Box(low=0, high=1, shape=(4,)) 
+        # time, volume, price drift, imbalance, 4 times allocation, 6 times volume  
+        # time, volume, price drift, 4 times allocation, 5 times volume 
+        self.observation_space = Box(low=-1, high=1, shape=(14,)) 
         # self.action_space = Discrete(self.initial_level+2, start=-1)
         # action space: values between in R for the levels [-1,0,1,2]
         self.action_space = Box(low=-10, high=10, shape=(4,), dtype=np.float32, seed=config['seed'])
+        # self.action_space = Simplex(shape=(4,), concentration=np.array([1] * 4), dtype=np.float32)
+
 
 
         ## logging 
@@ -506,6 +510,7 @@ class Market(gym.Env):
         self.initialize_book()
         self.initial_ask = self.get_best_price(side='ask')
         self.initial_bid = self.get_best_price(side='bid')
+        self.initial_mid_price = (self.initial_ask + self.initial_bid)/2
         self.active_orders = set()
 
         # reset volume 
@@ -539,13 +544,42 @@ class Market(gym.Env):
         return self._get_obs(), {}
     
     def _get_reward(self, reward, traded_volume):
-        return reward - self.initial_bid*traded_volume
+        return 1000*(reward - self.initial_bid*traded_volume)/(self.initial_volume*self.initial_bid)
+
+    def _find_order_allocation(self):
+        """
+        - find order allocation for observation 
+        """
+        best_bid = self.get_best_price(side='bid')
+        allocations = 4*[0]
+        for l in [0, 1, 2, 3]:
+            orders_on_level = 0
+            if best_bid+l+1 in self.price_map['ask']:
+                level = self.price_map['ask'][best_bid+l+1].copy()
+                for order_id in level:
+                    if self.order_map[order_id]['agent_id'] == 'agent':                        
+                        orders_on_level += 1 
+                allocations[l] = orders_on_level
+        remaining_volume = self.volume - sum(allocations)
+        assert remaining_volume >= 0
+        allocations[-1] += remaining_volume
+        allocations = np.array(allocations, dtype=np.float32)
+        if self.volume > 0:
+            allocations /= self.volume
+        elif self.volume == 0:
+            pass
+        else:
+            raise ValueError('volume is negative')
+        return allocations
+
     
     def _find_allocation(self, action):
         ## find vector of allocations
-        action = np.exp(action)/np.sum(np.exp(action))
+        # action = np.exp(action)/np.sum(np.exp(action))
         # action = np.array([0,0,0,1], dtype=np.float32)
         # note: this gets passed by copy not by reference 
+        # assert np.all(action >= 0)
+        # assert np.sum(action) == 1 
         available_volume = self.volume
         best_bid = self.get_best_price(side='bid')
         allocations = []
@@ -592,6 +626,13 @@ class Market(gym.Env):
         """
         the method returns observation, reward, terminated, truncated, info
         """
+
+        # transform action to allocation
+        action = np.exp(action) / np.sum(np.exp(action), axis=0)
+
+        ## check that all actions are positive 
+        assert np.all(action >= 0)
+        assert np.abs(np.sum(action) - 1) < 1e-3
 
         for order in self.active_orders:
             assert order in self.order_map
@@ -643,6 +684,7 @@ class Market(gym.Env):
             if out[0] == 'market':
                 if out[1]['agent']:
                     for order in out[1]['agent']: 
+                        # note: only single size limit orders 
                         reward += self._get_reward(reward=order['price'], traded_volume=1)
                         self.active_orders.remove(order['order_id'])
                         self.volume -= 1
@@ -657,8 +699,13 @@ class Market(gym.Env):
             # terminal time 
             if self.time == self.total_n_steps:
                 truncated = True
+                # remove active orders from the book 
+                assert len(self.active_orders) == self.volume 
+                for order in self.active_orders:
+                    self.process_order({'type': 'cancellation', 'order_id': order, 'agent_id': 'agent'})
+                # send remaining volume as market order 
                 order = {'agent_id': self.agent_id, 'type': 'market', 'volume': self.volume, 'side': 'bid'}
-                out = self.process_order(order)
+                out = self.process_order(order )
                 reward += self._get_reward(out[2], self.volume)
                 self.volume = 0 
                 return self._get_obs(), reward, terminated, truncated, {}
@@ -666,22 +713,43 @@ class Market(gym.Env):
         # measure reward relative to best bid reward - traded_volume*best_bid
         return self._get_obs(), reward, terminated, truncated, {}
     
+    def _book_shape(self):
+        # volume of first 3 levels on bid and ask side 
+        reference = np.array([365, 1080, 1684], dtype=np.float32)
+        bid_prices, bid_volumes = self.level2(side='bid', level=3)
+        ask_prices, ask_volumes = self.level2(side='ask', level=3)
+        #   
+        bid_volumes = np.array(bid_volumes, dtype=np.float32)
+        ask_volumes = np.array(ask_volumes, dtype=np.float32)
+        bid_volumes /= reference
+        ask_volumes /= reference     
+        out =  np.concatenate((bid_volumes, ask_volumes), dtype=np.float32)
+        out = np.clip(out, 0, 1)   
+        return out
+
     def _get_obs(self):
         '''
         - returns: (time, volume, price, imbalance)
         '''
         time = self.time/self.total_n_steps
         volume = self.volume/self.initial_volume
-        price_drift = (self.get_best_price('bid')  - self.initial_bid)/self.initial_bid
-        price_drift = max(0, min(1, price_drift))
+        mid_price = (self.get_best_price('ask') + self.get_best_price('bid'))/2
+        price_drift = 100*(mid_price  - self.initial_mid_price)/self.initial_mid_price
+        # limit price drift to [-1, 1]
+        price_drift = min(1.0, price_drift)
+        price_drift = max(-1.0, price_drift)
         # time = self.total_n_steps*time  
         # time = np.rint(time/100).astype(np.int32)
         # imbalance 
         bid_volume = self._get_best_volume(side='bid')
         ask_volume = self._get_best_volume(side='ask')
         imbalance = ask_volume/(bid_volume+ask_volume)
-        return np.array([time, volume, price_drift, imbalance], dtype=np.float32)
-        return (np.array([time], dtype=np.float32), self.volume, price_drift, np.array([imbalance], dtype=np.float32))
+        allocations = self._find_order_allocation()
+        first_part = np.array([time, volume, price_drift, imbalance], dtype=np.float32)
+        #
+        volumes = self._book_shape()
+        return np.concatenate((first_part, allocations, volumes))
+        # return (np.array([time], dtype=np.float32), self.volume, price_drift, np.array([imbalance], dtype=np.float32))
 
     def _get_best_volume(self, side):
         best_price = self.get_best_price(side=side)
@@ -702,8 +770,8 @@ class Market(gym.Env):
         ask_prices, ask_volumes = self.level2(side='ask', level=L)
         self.bid_volumes.append(bid_volumes)
         self.ask_volumes.append(ask_volumes)
-        # self.bid_prices.append(self.get_best_price(side='bid'))
-        # self.ask_prices.append(self.get_best_price(side='ask'))
+        self.bid_prices.append(bid_prices)
+        self.ask_prices.append(ask_prices)
         # best bid and ask prices 
         idx = np.nonzero(bid_volumes)[0][0]
         self.best_bid_prices.append(bid_prices[idx])
@@ -713,6 +781,13 @@ class Market(gym.Env):
         self.best_ask_volumes.append(ask_volumes[idx])
 
         return None
+    
+    # def log_limit_order_book_shape(self):
+    #     bid_volumes = self.get_best_volumes(level=30, side = 'bid')
+    #     ask_volumes = self.get_best_volumes(level=30, side = 'ask')
+    #     self.lob_shape_history['bid'].append(bid_volumes)
+    #     self.lob_shape_history['ask'].append(ask_volumes)
+    #     return None
     
     def log_trade(self, order):
         if order[0] == 'market':
@@ -724,6 +799,95 @@ class Market(gym.Env):
     
 
     ## plotting methods 
+
+    # plot heat map od the order book 
+    def heat_map(self):
+        N = 128
+        lightness = 108
+        reds = np.ones((N, 4))
+        reds[:, 0] = np.linspace(1, 1, N)
+        reds[:, 1] = np.linspace(lightness / N, 0, N)
+        reds[:, 2] = np.linspace(lightness / N, 0, N)
+        blues = np.ones((N, 4))
+        blues[:, 0] = np.linspace(0, lightness / N, N)
+        blues[:, 1] = np.linspace(0, lightness / N, N)
+        blues[:, 2] = np.linspace(1, 1, N)
+        newcolors = np.vstack([blues, reds])
+        cmp = ListedColormap(newcolors)
+
+        max_level = 30
+        N = len(self.bid_prices)
+        time = np.arange(N)
+        extended_time = []
+        prices = np.hstack((np.hstack(self.bid_prices),np.hstack(self.ask_prices)))
+        # prices = np.hstack(self.ask_prices)
+        volumes = np.hstack((-1*np.hstack(self.bid_volumes),np.hstack(self.ask_volumes)))
+        # volumes = np.hstack(self.ask_volumes)
+
+        for n in range(N):
+            # bid side   
+            # prices.extend(list(range(self.ask_prices[n]-1, self.ask_prices[n] - max_level - 1, -1)))
+            # volumes.extend([-1*x for x in self.lob_shape_history['bid'][n][:max_level]])
+            extended_time.extend(max_level*[time[n]])
+        for n in range(N):
+            extended_time.extend(max_level*[time[n]])
+            # bid side 
+            # prices.extend(list(range(self.bid_prices[n]+1, self.bid_prices[n] + max_level + 1, 1)))
+            # volumes.extend(self.lob_shape_history['ask'][n][:max_level])
+            # extended_time.extend(max_level*[time[n]])
+        sc = plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-2000, vmax=2000)
+        # sc = plt.scatter(extended_time, prices, c=volumes, cmap=cmp, vmin=-2000, vmax=2000)
+        plt.plot(time, self.best_ask_prices, '-', color='black', linewidth=3)
+        plt.plot(time, self.best_bid_prices, '-', color='black', linewidth=3)
+        # set x and y limits 
+        plt.ylim(bottom=995, top=1005)
+        ## plot micro price 
+        # ask = np.array(self.ask_prices)
+        # bid = np.array(self.bid_prices)
+        # ask_volume = np.array(self.ask_volumes)
+        # bid_volume = np.array(self.bid_volumes)
+        # micro_price = (ask*bid_volume + bid*ask_volume)/(ask_volume + bid_volume)
+        # plt.plot(time, micro_price, '-', color='grey', linewidth=2)
+        ## plot market orders        
+        market_ask = []    
+        volumes = []    
+        for x in self.trades:
+            if x is None:
+                market_ask.append(False)
+                volumes.append(0)
+            elif x[0] == 'bid':
+                market_ask.append(False)
+                volumes.append(x[1])
+            else:
+                market_ask.append(True)
+                volumes.append(x[1])
+
+        market_bid = []
+        for x in self.trades:
+            if x is None:
+                market_bid.append(False)
+            elif x[0] == 'ask':
+                market_bid.append(False)
+            else:
+                market_bid.append(True)
+
+        best_asks = np.array(self.best_ask_prices)
+        best_bids = np.array(self.best_bid_prices)
+        volumes = np.array(volumes)
+
+        best_ask_volumes = np.array(self.ask_volumes)
+        best_bid_volumes = np.array(self.bid_volumes)
+        ## updward facing triangle in scatter
+        # plt.scatter(time[market_bid], ask[market_bid], color='black', marker='^', s=80)
+        plt.scatter(time[market_ask], best_asks[market_ask], color='black', marker='^', s=0.5*volumes[market_ask]) 
+        plt.scatter(time[market_bid], best_bids[market_bid], color='black', marker='v', s=0.5*volumes[market_bid])
+        # plt.xlim(left=time[0], right=time[-1])
+        # plt.colorbar(sc)
+        # plt.tight_layout()
+        return None  
+
+
+
 
     # plot order book 
     def plot_level2_order_book(self, level=30, side='bid'):
@@ -816,7 +980,8 @@ if __name__ == '__main__':
     shortfalls = []
     volumes = []
     volumes.append(config['initial_volume'])
-    for n in range(10):
+    print(f'initial volume is {config["initial_volume"]}')
+    for n in range(1):
         # print(f'episode {n}')
         if n%100 == 0:
             print(f'episode {n}')
@@ -827,17 +992,23 @@ if __name__ == '__main__':
         actions = [] 
         q = []
         l = []
+        r = 0 
         terminated = truncated = False 
         while not terminated and not truncated: 
             # action = Agent.get_action(observation)
             # action = 0
             action = Market.action_space.sample()            
+            # action = np.array([0, 1, 0, 0], dtype=np.float32)
             action = np.array([-10, 10, -10, -10], dtype=np.float32)
             # action = 2
             assert action in Market.action_space
             observation, reward, terminated, truncated, info = Market.step(action)
+            # print(observation)
+            # print(observation.shape)
+            # print(Market.observation_space.shape)
+            r += reward
             # (time, volume, price, imbalance)            
-            print(f'observation is {observation}')
+            # print(f'observation is {observation}')
             volumes.append(Market.volume)
             q.append(observation[3])
             l.append(observation[1])
@@ -845,33 +1016,47 @@ if __name__ == '__main__':
             times.append(Market.time)
             assert observation in Market.observation_space
             observations.append(observation)
-        rewards.append(reward)
+        rewards.append(r)
         assert Market.volume == 0 
 
     elapsed = time.time()-start
-    print(volumes)
-    print(rewards)
+    # print(volumes)
+    # print(rewards)
     print(f'time elapsed in seconds: {elapsed}')
     # print(shortfalls)
     # print(times)
-    plt.figure()
-    Market.plot_prices()
-    plt.savefig('prices.png')
+    # plt.figure()
+    # Market.plot_prices()
+    # plt.savefig('prices.png')
     # plt.savefig('prices.png')
     # plt.plot(q)
     # plt.figure()
     # plt.plot(l)
     # plt.savefig('queue.png')
 
-    print(f'average reward is {np.mean(rewards)}')
-    print(f'max reward is {np.max(rewards)}')
-    print(f'min reward is {np.min(rewards)}')
-    print('done')
+    # print(f'average reward is {np.mean(rewards)}')
+    # print(f'max reward is {np.max(rewards)}')
+    # print(f'min reward is {np.min(rewards)}')
+    # print('done')
 
     rewards = np.array(rewards)
-    np.save('rewards_bench', rewards)
+    np.save('rewards_benchmark_100_lots', rewards)
+
+    print(f'mean reward is {np.mean(rewards)}')
+    print(f'max reward is {np.max(rewards)}')
+    print(f'min reward is {np.min(rewards)}')
     
     
+
+# performance of the benchmark strategy is around 6.9 
+# policy gradient can match 6.9 with dirichlet policy, 
+# this was not dirichlet, it was just gaussian with softmax applied within the environment 
+# pure dirichlet does not seem to be working yet 
+
+
+# performance of benchmark strategy for 100 lots 
+
+
 
 
 
