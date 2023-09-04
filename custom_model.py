@@ -37,6 +37,8 @@ class CustomTorchModel(TorchModelV2, nn.Module):
         )
         nn.Module.__init__(self)
 
+        hidden_notes = 256
+
         # hiddens = list(model_config.get("fcnet_hiddens", [])) + list(
         #     model_config.get("post_fcnet_hiddens", [])
         # )
@@ -117,40 +119,75 @@ class CustomTorchModel(TorchModelV2, nn.Module):
 
         # first layer 
         
-        initializer=normc_initializer(1.0)
-        linear = nn.Linear(obs_space.shape[0], 128, bias=True)
-        initializer(linear.weight)
+        # initializer=normc_initializer(1.0)
+        linear = nn.Linear(obs_space.shape[0], hidden_notes, bias=True)
+        # initializer(linear.weight)
         activation = nn.Tanh()
         first_layer = nn.Sequential(linear, activation)
 
         # second layer 
-        linear = nn.Linear(128, 128, bias=True)
-        initializer(linear.weight)
+        linear = nn.Linear(hidden_notes, hidden_notes, bias=True)
+        # initializer(linear.weight)
         activation = nn.Tanh()
         second_layer = nn.Sequential(linear, activation)
+
+        # third layer
+        # linear = nn.Linear(256, 256, bias=True)
+        # # initializer(linear.weight)
+        # activation = nn.Tanh()
+        # third_layer = nn.Sequential(linear, activation)
 
         # hidden layers 
         self._hidden_layers = nn.Sequential(first_layer, second_layer)
 
         # output layer
-        initializer=normc_initializer(0.01)
-        linear = nn.Linear(128, num_outputs, bias=True)
-        initializer(linear.weight)
-        activation = nn.Tanh()
-        self._logits = nn.Sequential(linear, activation)
+        # initializer=normc_initializer(0.01)
+        linear = nn.Linear(hidden_notes, num_outputs, bias=True)
+        # initializer(linear.weight)
+        # activation = nn.Softplus() 
+        # self._logits = nn.Sequential(linear, activation)
+        self._logits = nn.Sequential(linear)
 
+        ## value network
+
+        # first layer 
+        # initializer=normc_initializer(1.0)
+        linear = nn.Linear(obs_space.shape[0], hidden_notes, bias=True)
+        # initializer(linear.weight)
+        activation = nn.Tanh()
+        first_layer = nn.Sequential(linear, activation)
+
+        # second layer 
+        linear = nn.Linear(hidden_notes, hidden_notes, bias=True)
+        # initializer(linear.weight)
+        activation = nn.Tanh()
+        second_layer = nn.Sequential(linear, activation)
+
+        # third layer
+        # linear = nn.Linear(256, 256, bias=True)
+        # # initializer(linear.weight)
+        # activation = nn.Tanh()
+        # third_layer = nn.Sequential(linear, activation)
+
+        self._value_branch_separate = nn.Sequential(first_layer, second_layer)
+        
+        # output layer 
+        # initializer=normc_initializer(0.01)
+        linear = nn.Linear(hidden_notes, 1, bias=True)
+        # initializer(linear.weight)
+        self._value_branch = linear
 
         # value layer 
-        initializer=normc_initializer(0.01)
-        linear = nn.Linear(128, num_outputs, bias=True)
-        initializer(linear.weight)
-        self._value_branch = linear 
+        # initializer=normc_initializer(0.01)
+        # linear = nn.Linear(256, 1, bias=True)
+        # initializer(linear.weight)
+        # self._value_branch = linear 
 
         # Holds the current "base" output (before logits layer).
         self._features = None
         # Holds the last input, in case value branch is separate.
         self._last_flat_in = None
-        self._value_branch_separate = None 
+        # self._value_branch_separate = True
 
     @override(TorchModelV2)
     def forward(
@@ -163,6 +200,7 @@ class CustomTorchModel(TorchModelV2, nn.Module):
         self._last_flat_in = obs.reshape(obs.shape[0], -1)
         self._features = self._hidden_layers(self._last_flat_in)
         logits = self._logits(self._features) 
+        # logits = torch.add(logits, 1.0)
         return logits, state
 
     @override(TorchModelV2)
@@ -191,18 +229,19 @@ class TorchDirichlet(TorchDistributionWrapper):
 
         See issue #4440 for more details.
         """
+        inputs = torch.nn.functional.softplus(inputs) + 1.0
         self.epsilon = torch.tensor(1e-7).to(inputs.device)
-        layer = Softplus()
-        concentration = layer(inputs) + 1.0
+        # inputs = inputs + self.epsilon
         self.dist = torch.distributions.dirichlet.Dirichlet(
-            concentration=concentration,
+            concentration=inputs,
             validate_args=True,
         )
-        super().__init__(concentration, model)
+        super().__init__(inputs, model)
 
     @override(ActionDistribution)
     def deterministic_sample(self) -> TensorType:
-        self.last_sample = nn.functional.softmax(self.dist.concentration, dim=-1)
+        # self.last_sample = nn.functional.softmax(self.dist.concentration, dim=-1)
+        self.last_sample = self.dist.mean
         return self.last_sample
 
     @override(ActionDistribution)
