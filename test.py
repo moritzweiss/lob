@@ -1,5 +1,5 @@
 import numpy as np
-from cont_model.volume_only import OrderBook
+from volume_only import OrderBook
 
 
 
