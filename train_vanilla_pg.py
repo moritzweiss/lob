@@ -20,7 +20,7 @@ from ray.rllib.algorithms.a2c.a2c import A2CConfig
 
 from gymnasium.utils.env_checker import check_env
 
-env_config = {'total_n_steps': int(1e3), 'log': False, 'seed': None, 'initial_level': 2, 'initial_volume': 500}
+env_config = {'total_n_steps': int(1e3), 'log': False, 'seed': None, 'initial_level': 2, 'initial_volume': 100}
 M = Market(config=env_config)
 check_env(M)
 
@@ -37,10 +37,13 @@ model_config = { # By default, the MODEL_DEFAULTS dict above will be used.
          "custom_model_config": custom_config,
          "custom_action_dist": "my_dist"} 
 
+model_config = {"vf_share_layers":False} 
+
+
 # config = PPOConfig().training(lr=[[int(0), 1e-3], [int(1e4), 1e-4], [int(1e5), 5e-5], [int(2e5), 1e-5], [int(5e5), 5e-6]])
 # learning rate scheduler does not seem to be working 
 
-config = (PPOConfig().rollouts(num_rollout_workers=17, batch_mode='complete_episodes', observation_filter='NoFilter')
+config = (PPOConfig().rollouts(num_rollout_workers=0, batch_mode='complete_episodes', observation_filter='NoFilter')
         .framework('torch')
         .resources(num_gpus=0.25)
         .environment(env=Market, env_config=env_config)
@@ -49,7 +52,7 @@ config = (PPOConfig().rollouts(num_rollout_workers=17, batch_mode='complete_epis
         #     "critic_learning_rate": 1e-3,
         #     "entropy_learning_rate": 1e-3,
         # })
-        # .training(train_batch_size=1024, lr=tune.grid_search([1e-3, 1e-3, 5e-3, 5e-3]), _enable_learner_api=False)
+        .training(train_batch_size=1024, lr=tune.grid_search([1e-3, 5e-4, 1e-4, 5e-5]), _enable_learner_api=False)
         # .training(train_batch_size=128, model=model_config, lr=1e-3, _enable_learner_api=False)
         # .training(train_batch_size=8000, gamma=1.0, lr = tune.grid_search([5e-5, 1e-5]), model=model_config, _enable_learner_api=False, sgd_minibatch_size=2048, num_sgd_iter=8, clip_param=0.4)
         # .training(train_batch_size=8000, gamma=1.0, lr = tune.grid_search([5e-5, 1e-5]), model=model_config, _enable_learner_api=False, sgd_minibatch_size=2048, num_sgd_iter=8, clip_param=0.4)
@@ -66,10 +69,12 @@ config = (PPOConfig().rollouts(num_rollout_workers=17, batch_mode='complete_epis
         # .training(train_batch_size=4096, gamma=1.0, lr = 1e-2,  model=model_config, _enable_learner_api=False, sgd_minibatch_size=2048, num_sgd_iter=tune.grid_search([1, 1, 4, 4]), use_kl_loss=False , clip_param=10.0, vf_clip_param=100.0, use_gae=False, use_critic=True)
         # .training(train_batch_size=8192, gamma=1.0, lr = 1e-2,  model=model_config, _enable_learner_api=False, sgd_minibatch_size=1024 , num_sgd_iter=1 , use_kl_loss=False , clip_param=tune.grid_search([0.3, 0.3, 0.5, 0.5]), vf_clip_param=100.0, use_gae=False, use_critic=True)
         # .training(train_batch_size=8192, gamma=1.0, lr = 1e-2,  model=model_config, _enable_learner_api=False, sgd_minibatch_size=tune.grid_search(4*[1024]) , num_sgd_iter=1 , use_kl_loss=False , clip_param=0.3, vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0)
-        .training(train_batch_size=8192, gamma=1.0, lr = 1e-3, _enable_learner_api=False, sgd_minibatch_size=1024 , num_sgd_iter=1 , use_kl_loss=False , clip_param=tune.grid_search([0.5, 0.5, 0.5, 0.5]) , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0)
+        # .training(train_batch_size=8192, gamma=1.0, lr = 1e-3 , _enable_learner_api=False, sgd_minibatch_size=1024 , num_sgd_iter=1 , use_kl_loss=False , clip_param=0.3 , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0,) #  model=model_config)
+        # .training(train_batch_size=8192, gamma=1.0, lr = 1e-3, _enable_learner_api=False, sgd_minibatch_size=tune.grid_search(4*[1024]) , num_sgd_iter=1 , use_kl_loss=False , clip_param=0.3 , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0, model=model_config)
+        .training(train_batch_size=512, gamma=1.0, lr = 1e-3, _enable_learner_api=False, sgd_minibatch_size=128 , num_sgd_iter=1 , use_kl_loss=False , clip_param=0.3 , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0, model=model_config)
         # .training(train_batch_size=16384, gamma=1.0, lr = 1e-2,  model=model_config, _enable_learner_api=False, sgd_minibatch_size=tune.grid_search([1024, 2048]) , num_sgd_iter=tune.grid_search([1,2]) , use_kl_loss=False , clip_param=0.4, vf_clip_param=100.0, use_gae=False, use_critic=True)
         # .training(gamma=1.0, lr = tune.grid_search([1e-2, 1e-2, 5e-3, 1e-3]),  model=model_config, _enable_learner_api=False, train_batch_size=8192)
-        # .training(train_batch_size=8192, gamma=1.0, lr = tune.grid_search([1e-2, 1e-2, 1e-2, 1e-2]), model=model_config, _enable_learner_api=False)
+        # .training(train_batch_size=8192, gamma=1.0, lr = tune.grid_search([1e-2, 1e-2, 1e-2, 1e-2]), model=model_config, _e1nable_learner_api=False)
         # .training(train_batch_size=8192, gamma=1.0, lr = tune.grid_search([1e-2, 1e-2, 1e-2, 1e-2]), model=model_config, _enable_learner_api=False)
         # .training(train_batch_size=128, gamma=1.0, lr = 1e-2, model=model_config, _enable_learner_api=False, sgd_minibatch_size=128, num_sgd_iter=1, use_kl_loss=False, clip_param=2.0, vf_clip_param=200, use_gae=False, use_critic=True)
         .debugging(fake_sampler=False)
@@ -79,22 +84,22 @@ config = (PPOConfig().rollouts(num_rollout_workers=17, batch_mode='complete_epis
         # .evaluation(evaluation_interval=5, evaluation_duration=4000, evaluation_num_workers=10, evaluation_duration_unit='episodes')
         ) 
 
-# algo = config.build()
-# algo.train()
+algo = config.build()
+algo.train()
 
 
-tuner = tune.Tuner(
-    "PPO",
-    run_config=air.RunConfig(
-        stop={"training_iteration": 100}, storage_path = '/u/weim/lob/results',  name = '100_lots_Gaussian_softmax', 
-        checkpoint_config=air.CheckpointConfig(checkpoint_frequency=5, checkpoint_at_end=True, checkpoint_score_order='max', 
-                                               checkpoint_score_attribute='episode_reward_mean'), verbose=1,
-    ),
-    param_space=config,
-)
+# tuner = tune.Tuner(
+#     "PPO",
+#     run_config=air.RunConfig(
+#         stop={"training_iteration": 100}, storage_path = '/u/weim/lob/results',  name = '100_lots_Gaussian_softmax_imbalance', 
+#         checkpoint_config=air.CheckpointConfig(checkpoint_frequency=5, checkpoint_at_end=True, checkpoint_score_order='max', 
+#                                                checkpoint_score_attribute='episode_reward_mean'), verbose=1,
+#     ),
+#     param_space=config,
+# )
 
 
-results = tuner.fit()
+# results = tuner.fit()
 
 
 # Get the best result based on a particular metric.
