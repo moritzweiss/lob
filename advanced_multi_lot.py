@@ -39,12 +39,23 @@ class SubmitAndLeaveAgent:
 class Market(gym.Env):
 
     def __init__(self, config):
-
+        
+        if config['env_type'] == 'simple':
+            self.imbalance_trader = False
+        elif config['env_type'] == 'imbalance':
+            self.imbalance_trader = True
+        else:
+            raise ValueError('env_type not supported')
+        
         # config is dict with entries {'total_n_steps', 'log', 'initial_level'}
         # initial_level places the limit order at best_ask + initial_level 
         # also determines the dimension of observation space and action space as [-1,0,1, ... ,initial_level]
 
         self.np_random = np.random.default_rng(config['seed'])
+
+        # only for the linear strategy 
+        self.withhold_volume = 0 
+        # self.total_volume = config['initial_volume']
 
         ## order book related attributes
         self.order_map = {}
@@ -72,7 +83,7 @@ class Market(gym.Env):
         
         # self.initial_shape = np.ones(30)*500
 
-        shape = np.load('/u/weim/lob/stationary_shape.npz')
+        shape = np.load('/u/weim/lob/data/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
 
@@ -112,7 +123,6 @@ class Market(gym.Env):
         self.time = 0 
 
         self.total_n_steps = config['total_n_steps']
-
 
     ## order book related methods 
     def process_order(self, order):
@@ -214,7 +224,7 @@ class Market(gym.Env):
         
         self.order_map[order_id] = order
 
-        return 'limit', order_id
+        return ('limit', order_id) 
 
     def market_order(self, order):
         """
@@ -325,7 +335,10 @@ class Market(gym.Env):
         Args:
             best bid and ask price
             bid and ask volumes they should match the length of the limit, cancel intensities 
-                
+
+        Note: the method directly cancells the orders in the book. or adds limit orders. or executes market orders. 
+        It doesnt only generate orders. But also matches them against the order book. 
+            
         Returns:
         limit, market, or cancellation 
             limit example: order = {'agent_id': 'agent', 'type': 'limit', 'side': , 'price': 100, 'volume': 10.0}
@@ -348,8 +361,32 @@ class Market(gym.Env):
         bid_cancel_intensity = np.sum(self.cancel_intensities*bid_volumes)
         limit_intensity = np.sum(self.limit_intensities)
 
-        probability = np.array([self.market_intesity, self.market_intesity, limit_intensity, limit_intensity, bid_cancel_intensity, ask_cancel_intensity])
-        probability /= np.sum(probability)
+        # check if bid ask volumes are zero at the same time 
+        if (bid_volumes[0] == 0) and (ask_volumes[0] == 0):
+            imbalance = 0
+        else:
+            imbalance = ((bid_volumes[0]) - ask_volumes[0])/(bid_volumes[0] + ask_volumes[0])
+            # imbalance = (np.sum(bid_volumes[:1]) - np.sum(ask_volumes[:1]))/(np.sum(bid_volumes[:1]) + np.sum(ask_volumes[:1]))    
+        if np.isnan(imbalance):
+            print(imbalance)
+            print(bid_volumes)
+            print(ask_volumes)
+            raise ValueError('imbalance is nan')
+        if self.imbalance_trader:
+            # market intensity 
+            market_buy_intensity = self.market_intesity*(1+imbalance)
+            market_sell_intensity = self.market_intesity*(1-imbalance)
+            # test 
+            # market_buy_intensity = self.market_intesity*(1-imbalance)
+            # market_sell_intensity = self.market_intesity*(1+imbalance)
+        else:
+            market_buy_intensity = self.market_intesity
+            market_sell_intensity = self.market_intesity
+
+        probability = np.array([market_sell_intensity, market_buy_intensity, limit_intensity, limit_intensity, bid_cancel_intensity, ask_cancel_intensity])
+        # market sell order arrives on the best bid 
+        # market buy order arrives on the best ask
+        probability /= np.sum(probability)        
 
         action, side = self.np_random.choice([('market', 'bid'), ('market', 'ask'), ('limit', 'bid'), ('limit', 'ask'), ('cancellation', 'bid'), ('cancellation', 'ask')], p=probability)
 
@@ -571,9 +608,8 @@ class Market(gym.Env):
         else:
             raise ValueError('volume is negative')
         return allocations
-
     
-    def _find_allocation(self, action):
+    def _find_allocation(self, action, additional_lots=0):
         ## find vector of allocations
         # action = np.exp(action)/np.sum(np.exp(action))
         # action = np.array([0,0,0,1], dtype=np.float32)
@@ -619,10 +655,10 @@ class Market(gym.Env):
                 self.process_order(order)
                 self.active_orders.remove(order_id)
                 available_volume += 1 
-        assert available_volume == sum(new_orders)
+        # assert available_volume == sum(new_orders)
         return new_orders
 
-    def step(self, action=None):
+    def step(self, action=None, linear_strategy=False):
         """
         the method returns observation, reward, terminated, truncated, info
         """
@@ -650,7 +686,7 @@ class Market(gym.Env):
             reward += self._get_reward(reward=out[2], traded_volume=new_orders[0])
             self.volume -= new_orders[0]
             assert self.volume >= 0  
-            if self.volume == 0:
+            if self.volume == 0 and self.withhold_volume == 0:
                 # review the following. how to calculate reward ? 
                 terminated = True
                 return self._get_obs(), reward, terminated, truncated, {}
@@ -689,7 +725,7 @@ class Market(gym.Env):
                         self.active_orders.remove(order['order_id'])
                         self.volume -= 1
                     assert self.volume >= 0  
-                    if self.volume == 0:
+                    if self.volume == 0 and self.withhold_volume==0:
                         terminated = True         
                         return self._get_obs(), reward, terminated, truncated, {}
             
@@ -698,6 +734,7 @@ class Market(gym.Env):
 
             # terminal time 
             if self.time == self.total_n_steps:
+                assert self.withhold_volume == 0 
                 truncated = True
                 # remove active orders from the book 
                 assert len(self.active_orders) == self.volume 
@@ -781,14 +818,7 @@ class Market(gym.Env):
         self.best_ask_volumes.append(ask_volumes[idx])
 
         return None
-    
-    # def log_limit_order_book_shape(self):
-    #     bid_volumes = self.get_best_volumes(level=30, side = 'bid')
-    #     ask_volumes = self.get_best_volumes(level=30, side = 'ask')
-    #     self.lob_shape_history['bid'].append(bid_volumes)
-    #     self.lob_shape_history['ask'].append(ask_volumes)
-    #     return None
-    
+        
     def log_trade(self, order):
         if order[0] == 'market':
             # assert order[1]['market_agent'], f'print order: {order}'
@@ -886,9 +916,6 @@ class Market(gym.Env):
         # plt.tight_layout()
         return None  
 
-
-
-
     # plot order book 
     def plot_level2_order_book(self, level=30, side='bid'):
         bid_prices, bid_volumes = self.level2(level=level, side='bid')
@@ -955,12 +982,9 @@ class Market(gym.Env):
         plt.scatter(time[bid_mask], bid_prices[bid_mask], color='red', marker='x')
         plt.scatter(time[ask_mask], ask_prices[ask_mask], color='green', marker='x')
         
-
-        #ToDo: log the market trades 
-
         return None 
 
-## measure time 
+
 
 
 if __name__ == '__main__': 
@@ -969,7 +993,7 @@ if __name__ == '__main__':
     # - cancellation of far out orders makes difference in time 
     import time 
     start = time.time()
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10}
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10, 'imbalance_trader': False}
     Market = Market(config=config)
     # check_env(Market)
     # assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
@@ -981,7 +1005,7 @@ if __name__ == '__main__':
     volumes = []
     volumes.append(config['initial_volume'])
     print(f'initial volume is {config["initial_volume"]}')
-    for n in range(1):
+    for n in range(1000):
         # print(f'episode {n}')
         if n%100 == 0:
             print(f'episode {n}')
@@ -997,7 +1021,7 @@ if __name__ == '__main__':
         while not terminated and not truncated: 
             # action = Agent.get_action(observation)
             # action = 0
-            action = Market.action_space.sample()            
+            # action = Market.action_space.sample()            
             # action = np.array([0, 1, 0, 0], dtype=np.float32)
             action = np.array([-10, 10, -10, -10], dtype=np.float32)
             # action = 2

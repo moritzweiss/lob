@@ -3,6 +3,25 @@ from collections import OrderedDict
 from sortedcontainers import SortedDict
 
 
+from torch.distributions import Dirichlet
+from torch.distributions.normal import Normal
+import torch 
+
+mean = torch.tensor([1.0, 1.0, 1.0, 1.0]).expand(2, 4)
+scale = torch.tensor([1.0, 1.0, 1.0, 10.0]).expand(2, 4)
+m = Normal(mean, scale)
+out = m.sample()
+logp = m.log_prob(out)
+
+
+concentration = torch.tensor([100.0, 100.0, 1.0, 1.0]).expand(2, 4)
+m = Dirichlet(concentration)
+out = m.sample() 
+logp = m.log_prob(out)
+
+print(1)
+
+
 class MyClass:
     def __init__(self, x):
         self.x = x

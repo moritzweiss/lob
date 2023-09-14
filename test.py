@@ -1,8 +1,6 @@
 import numpy as np
 from volume_only import OrderBook
 
-
-
         
 def test1():
     # initialize order book 
