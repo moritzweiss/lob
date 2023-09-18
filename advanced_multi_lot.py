@@ -538,7 +538,7 @@ class Market(gym.Env):
 
     ## gym methods 
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, initialize_orders=True):
         super().reset(seed=seed)
         
         # empty the order book and initialize 
@@ -556,10 +556,13 @@ class Market(gym.Env):
         # submit 10 limit orders to the second ask level in the book 
         # place orders as single lots 
         best_ask = self.get_best_price(side='ask')
-        for _ in range(self.volume):
-            order = {'agent_id':self.agent_id , 'type':'limit', 'side':'ask', 'price':best_ask+self.initial_level, 'volume':1} 
-            out = self.process_order(order)
-            self.active_orders.add(out[1])
+        if initialize_orders:
+            for _ in range(self.volume):
+                order = {'agent_id':self.agent_id , 'type':'limit', 'side':'ask', 'price':best_ask+self.initial_level, 'volume':1} 
+                out = self.process_order(order)
+                self.active_orders.add(out[1])
+        else:
+            pass
         # self.active_order = out[1]
         # self.level = level
 
@@ -658,7 +661,8 @@ class Market(gym.Env):
         # assert available_volume == sum(new_orders)
         return new_orders
 
-    def step(self, action=None, linear_strategy=False):
+    def step(self, action=None, no_action=False, additional_lots=0, direction='down'):
+        # warning: changed drift
         """
         the method returns observation, reward, terminated, truncated, info
         """
@@ -676,28 +680,35 @@ class Market(gym.Env):
         reward = 0
         truncated = False
         terminated = False        
-        new_orders = self._find_allocation(action=action)
 
-        # send market order 
-        if new_orders[0] > 0:
-            order = {'agent_id': self.agent_id, 'type': 'market', 'volume': new_orders[0], 'side': 'bid'}                          
-            out = self.process_order(order)
-            # add relative rewards here 
-            reward += self._get_reward(reward=out[2], traded_volume=new_orders[0])
-            self.volume -= new_orders[0]
-            assert self.volume >= 0  
-            if self.volume == 0 and self.withhold_volume == 0:
-                # review the following. how to calculate reward ? 
-                terminated = True
-                return self._get_obs(), reward, terminated, truncated, {}
+        if no_action:
+            pass
+        else:
+            if additional_lots == 0:
+                new_orders = self._find_allocation(action=action)
+            else:
+                new_orders = [0, additional_lots, 0, 0]
 
-        # send new limit orders 
-        for n_orders, level in zip(new_orders[1:], [1,2,3]):
-            for _ in range(n_orders):
-                order = {'agent_id': self.agent_id, 'type': 'limit', 'volume': 1, 'side': 'ask', 'price': self.get_best_price('bid')+level}
+            # send market order 
+            if new_orders[0] > 0:
+                order = {'agent_id': self.agent_id, 'type': 'market', 'volume': new_orders[0], 'side': 'bid'}                          
                 out = self.process_order(order)
-                self.active_orders.add(out[1])
-                assert out[1] in self.order_map
+                # add relative rewards here 
+                reward += self._get_reward(reward=out[2], traded_volume=new_orders[0])
+                self.volume -= new_orders[0]
+                assert self.volume >= 0  
+                if self.volume == 0 and self.withhold_volume == 0:
+                    # review the following. how to calculate reward ? 
+                    terminated = True
+                    return self._get_obs(), reward, terminated, truncated, {}
+
+            # send new limit orders 
+            for n_orders, level in zip(new_orders[1:], [1,2,3]):
+                for _ in range(n_orders):
+                    order = {'agent_id': self.agent_id, 'type': 'limit', 'volume': 1, 'side': 'ask', 'price': self.get_best_price('bid')+level}
+                    out = self.process_order(order)
+                    self.active_orders.add(out[1])
+                    assert out[1] in self.order_map
 
         # market actions 
         for _ in range(100):
@@ -729,8 +740,31 @@ class Market(gym.Env):
                         terminated = True         
                         return self._get_obs(), reward, terminated, truncated, {}
             
-            for order in self.active_orders:
-                assert order in self.order_map
+            # for order in self.active_orders:
+            #     assert order in self.order_map
+
+            if direction == None:
+                pass
+            elif direction == 'down':
+                order = {'agent_id': self.market_agent_id, 'type': 'market', 'side': 'bid', 'volume': 1}
+                self.process_order(order)
+            elif direction == 'up':
+                order = {'agent_id': self.market_agent_id, 'type': 'market', 'side': 'ask', 'volume': 1}
+                out = self.process_order(order)
+                if out[0] == 'market':
+                    if out[1]['agent']:
+                        # WARNING: looks like a bug. what if a market order fills multiple orders? NO seems ok. IN GENERAL, make cose base more flexible. 
+                        for order in out[1]['agent']: 
+                            # note: only single size limit orders 
+                            reward += self._get_reward(reward=order['price'], traded_volume=1)
+                            self.active_orders.remove(order['order_id'])
+                            self.volume -= 1
+                        assert self.volume >= 0  
+                        if self.volume == 0 and self.withhold_volume==0:
+                            terminated = True         
+                            return self._get_obs(), reward, terminated, truncated, {}
+            else:
+                raise ValueError('direction must be either up or down or None')
 
             # terminal time 
             if self.time == self.total_n_steps:
