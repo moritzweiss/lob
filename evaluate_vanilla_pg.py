@@ -57,16 +57,21 @@ sys.path.append(parent)
 # agent: all_passive, linear_passive, rl
 
 class SampleStrategy():
-    def __init__(self, n_lots=250, env_type='imbalance', strategy='linear_passive', n_samples=100) -> None:
-        assert strategy in ['all_passive', 'linear_passive', 'rl']
+    def __init__(self, n_lots=250, env_type='imbalance', strategy='linear_passive', n_samples=100, drift=None) -> None:
+        assert strategy in ['all_passive', 'linear_passive', 'rl', 'submit_and_leave', 'submit_and_leave_linear']
         assert n_lots in [10, 100, 250]
         assert env_type in ['imbalance', 'simple']
         self.n_lots = n_lots
         self.env_type = env_type
         self.strategy = strategy
         self.n_samples = n_samples
+        assert drift in ['down', 'up', None, 'random']
+        self.drift = drift
         #
-        path = f'{current}/results/{self.n_lots}_{self.env_type}'
+        if drift == 'down':
+            path = f'{current}/results/{self.n_lots}_{self.env_type}_down'
+        else:
+            path = f'{current}/results/{self.n_lots}_{self.env_type}_down'
         analysis = tune.ExperimentAnalysis(path, default_metric="episode_reward_mean", default_mode="max")
         best_trial = analysis.get_best_trial(metric="episode_reward_mean", mode="max", scope="last")
         config = analysis.get_best_config()
@@ -93,45 +98,72 @@ class SampleStrategy():
             AC = AC.update_from_dict(config)
             agent = AC.build()
             agent.restore(path)
-        if self.strategy == 'linear_passive':
-            v_delta = 25
-            pass 
+        # if self.strategy == 'linear_passive':
+        #     v_delta = 25
+        #     pass 
         # other options: scope="last", scope="all"
         config['env_config']['seed'] = seed
         M = Market(config=config['env_config'])
         rewards = []
-        print('start sampling')
+        # print('start sampling')
         for n in range(self.n_samples):
+            # draw ramdom either 'down' or 'up' from bernoulli distribution             
+            if self.drift == 'down':
+                direction = 'down'
+            elif self.drift == 'random':
+                direction = np.random.choice(['up', 'down'])
+            else:
+                direction = None            
             reward_per_episode = 0 
             terminated = truncated = False
-            if self.strategy == 'linear_passive':
+            if self.strategy == 'linear_passive' or self.strategy == 'submit_and_leave_linear':
                 # this causes 25 orders to be placed in the book on rest 
                 volume_delta = int(config['env_config']['initial_volume']/10)
                 M.initial_volume = volume_delta
                 M.withhold_volume = config['env_config']['initial_volume'] - volume_delta
 
             # observe the current order distribution
-            observation, _ = M.reset()
+            # this send initial volume into the book 
+            if self.strategy == 'submit_and_leave_linear':
+                observation, _ = M.reset(initialize_orders=False)
+            else:
+                observation, _ = M.reset(initialize_orders=True)
             while not terminated and not truncated:
+                # actions 
                 if self.strategy == 'rl':
                     action = agent.compute_single_action(observation, explore=False)
                 elif self.strategy == 'all_passive':
                     action = np.array([-10, 10, -10, -10], dtype=np.float32)
-                else:
+                elif self.strategy == 'submit_and_leave':
+                    action = np.array([-10, 10, -10, -10], dtype=np.float32)
+                elif self.strategy == 'linear_passive':
                     # add 25 lots to the book 
                     action = np.array([-10, 10, -10, -10], dtype=np.float32)
-                observation, reward, terminated, truncated, info = M.step(action)
-                if self.strategy == 'linear_passive' and not truncated :
+                elif self.strategy == 'submit_and_leave_linear':
+                    action = np.array([-10, 10, -10, -10], dtype=np.float32)
+                else:
+                    raise NotImplementedError
+                # transitions 
+                if self.strategy == 'submit_and_leave':
+                    if M.time == 0:
+                        observation, reward, terminated, truncated, info = M.step(action, direction=direction)
+                    else:
+                        observation, reward, terminated, truncated, info = M.step(action, no_action=True, direction=direction)
+                elif self.strategy == 'submit_and_leave_linear':
+                    observation, reward, terminated, truncated, info = M.step(action, additional_lots=volume_delta, direction=direction)
+                else:
+                    observation, reward, terminated, truncated, info = M.step(action, direction=direction)
+                if (self.strategy == 'linear_passive' or self.strategy == 'submit_and_leave_linear')  and not truncated :
                     # add more volume 
                     M.volume += volume_delta
                     M.withhold_volume -= volume_delta
                 reward_per_episode += reward
-                if self.strategy == 'linear_passive':
+                if self.strategy == 'linear_passive' or self.strategy == 'submit_and_leave_linear':
                     pass
                 else:
                     assert observation in M.observation_space
                 # assert observation in M.observation_space
-            if self.strategy == 'linear_passive':
+            if self.strategy == 'linear_passive' or self.strategy == 'submit_and_leave_linear':
                 # initial volume is 25
                 rewards.append(reward_per_episode*0.1)
             else:
@@ -147,19 +179,30 @@ class SampleStrategy():
         # print(out)
         print('DONE')
         rewards = np.concatenate(out)   
+
         print(f'total number of episodes: {len(rewards)}')
         print(f'the mean reward is {np.mean(rewards)}')
         print(f'the min reward is {np.min(rewards)}')
         print(f'the max reward is {np.max(rewards)}')
         
+        if self.drift == None: 
+            np.save(f'data/rewards_{self.n_lots}_{self.strategy}_{self.env_type}', rewards)
+        else:
+            np.save(f'data/rewards_{self.n_lots}_{self.strategy}_{self.env_type}_{self.drift}', rewards)
         # e.g. rewards_100_rl_imbalance.npy
-        np.save(f'data/rewards_{self.n_lots}_{self.strategy}_{self.env_type}', rewards)
         return rewards
 
+# S = SampleStrategy(n_lots=250, env_type='imbalance', strategy='all_passive', n_samples=250, drift='down')
+# S.sample_from_environment(seed=0)
 
 # agent: all_passive, linear_passive, rl
-S = SampleStrategy(n_lots=250, env_type='simple', strategy='rl', n_samples=250)
-S.multi_process_sample(n_workers=20, seed=0)
+# 'all_passive', 'linear_passive']
+for n_lots in [250]:
+    for strategy in ['rl', 'all_passive', 'linear_passive']:
+        for drift in ['down']:
+            # print(S.drift)
+            S = SampleStrategy(n_lots=n_lots, env_type='imbalance', strategy=strategy, n_samples=25, drift=drift)
+            S.multi_process_sample(n_workers=1, seed=0)
 
 
 # n_workers = 10
