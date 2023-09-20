@@ -30,7 +30,7 @@ from gymnasium.utils.env_checker import check_env
 # ray.init(local_mode=True)
 
 
-env_config = {'total_n_steps': int(1e3), 'log': False, 'seed': None, 'initial_level': 2, 'initial_volume': 250, 'env_type': 'imbalance'}
+env_config = {'total_n_steps': int(1e3), 'log': False, 'seed': None, 'initial_level': 2, 'initial_volume': 10, 'env_type': 'down'}
 M = Market(config=env_config)
 check_env(M)
 
@@ -111,7 +111,7 @@ config = (PPOConfig().rollouts(num_rollout_workers=17, batch_mode='complete_epis
 tuner = tune.Tuner(
     "PPO",
     run_config=air.RunConfig(
-        stop={"training_iteration": 100}, storage_path = f"{current}/results",  name = f"{env_config['initial_volume']}_{env_config['env_type']}_down", 
+        stop={"training_iteration": 50}, storage_path = f"{current}/results",  name = f"{env_config['initial_volume']}_{env_config['env_type']}", 
         checkpoint_config=air.CheckpointConfig(checkpoint_frequency=5, checkpoint_at_end=True, checkpoint_score_order='max', 
                                                checkpoint_score_attribute='episode_reward_mean'), verbose=1,
     ),
