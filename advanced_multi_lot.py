@@ -42,8 +42,13 @@ class Market(gym.Env):
         
         if config['env_type'] == 'simple':
             self.imbalance_trader = False
+            self.drift_down = False
         elif config['env_type'] == 'imbalance':
             self.imbalance_trader = True
+            self.drift_down = False
+        elif config['env_type'] == 'down':
+            self.imbalance_trader = True
+            self.drift_down = True
         else:
             raise ValueError('env_type not supported')
         
@@ -56,6 +61,9 @@ class Market(gym.Env):
         # only for the linear strategy 
         self.withhold_volume = 0 
         # self.total_volume = config['initial_volume']
+
+        # drift 
+        # self.drift_down = config['drift_down']
 
         ## order book related attributes
         self.order_map = {}
@@ -661,7 +669,7 @@ class Market(gym.Env):
         # assert available_volume == sum(new_orders)
         return new_orders
 
-    def step(self, action=None, no_action=False, additional_lots=0, direction='down'):
+    def step(self, action=None, no_action=False, additional_lots=0):
         # warning: changed drift
         """
         the method returns observation, reward, terminated, truncated, info
@@ -741,32 +749,15 @@ class Market(gym.Env):
                         return self._get_obs(), reward, terminated, truncated, {}
             
             # for order in self.active_orders:
-            #     assert order in self.order_map
+            # assert order in self.order_map
 
-            if direction == None:
-                pass
-            elif direction == 'down':
+            if self.drift_down:
                 order = {'agent_id': self.market_agent_id, 'type': 'market', 'side': 'bid', 'volume': 1}
                 self.process_order(order)
-            elif direction == 'up':
-                order = {'agent_id': self.market_agent_id, 'type': 'market', 'side': 'ask', 'volume': 1}
-                out = self.process_order(order)
-                if out[0] == 'market':
-                    if out[1]['agent']:
-                        # WARNING: looks like a bug. what if a market order fills multiple orders? NO seems ok. IN GENERAL, make cose base more flexible. 
-                        for order in out[1]['agent']: 
-                            # note: only single size limit orders 
-                            reward += self._get_reward(reward=order['price'], traded_volume=1)
-                            self.active_orders.remove(order['order_id'])
-                            self.volume -= 1
-                        assert self.volume >= 0  
-                        if self.volume == 0 and self.withhold_volume==0:
-                            terminated = True         
-                            return self._get_obs(), reward, terminated, truncated, {}
             else:
-                raise ValueError('direction must be either up or down or None')
+                pass
 
-            # terminal time 
+            # handle terminal time 
             if self.time == self.total_n_steps:
                 assert self.withhold_volume == 0 
                 truncated = True
@@ -1027,7 +1018,8 @@ if __name__ == '__main__':
     # - cancellation of far out orders makes difference in time 
     import time 
     start = time.time()
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10, 'imbalance_trader': False}
+    # env type: simple, imbalance, down
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10, 'env_type': 'down'}
     Market = Market(config=config)
     # check_env(Market)
     # assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
@@ -1039,7 +1031,7 @@ if __name__ == '__main__':
     volumes = []
     volumes.append(config['initial_volume'])
     print(f'initial volume is {config["initial_volume"]}')
-    for n in range(1000):
+    for n in range(100):
         # print(f'episode {n}')
         if n%100 == 0:
             print(f'episode {n}')
