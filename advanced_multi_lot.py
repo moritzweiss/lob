@@ -40,6 +40,9 @@ class Market(gym.Env):
 
     def __init__(self, config):
         
+        # if true transform actions to the simplex 
+        # should be set to False for some benchmark agents 
+        
         if config['env_type'] == 'simple':
             self.imbalance_trader = False
             self.drift_down = False
@@ -107,6 +110,7 @@ class Market(gym.Env):
         self.observation_space = Tuple(( Box(0,1), Discrete(self.initial_volume+1, start=0), Discrete(7), Box(0,1)))
         # time, volume, price drift, imbalance, 4 times allocation, 6 times volume  
         # time, volume, price drift, 4 times allocation, 5 times volume 
+
         self.observation_space = Box(low=-1, high=1, shape=(14,)) 
         # self.action_space = Discrete(self.initial_level+2, start=-1)
         # action space: values between in R for the levels [-1,0,1,2]
@@ -669,14 +673,18 @@ class Market(gym.Env):
         # assert available_volume == sum(new_orders)
         return new_orders
 
-    def step(self, action=None, no_action=False, additional_lots=0):
+    def step(self, action=None, no_action=False, additional_lots=0, transform_action=True):
         # warning: changed drift
         """
         the method returns observation, reward, terminated, truncated, info
         """
 
         # transform action to allocation
-        action = np.exp(action) / np.sum(np.exp(action), axis=0)
+        # TODO: softmax should be applied directly in the distribution class
+        if transform_action:
+            action = np.exp(action) / np.sum(np.exp(action), axis=0)
+        else:
+            pass
 
         ## check that all actions are positive 
         assert np.all(action >= 0)
@@ -718,7 +726,7 @@ class Market(gym.Env):
                     self.active_orders.add(out[1])
                     assert out[1] in self.order_map
 
-        # market actions 
+        # market transitions 
         for _ in range(100):
             if self.log:
                 self.logging()
@@ -775,11 +783,11 @@ class Market(gym.Env):
         # measure reward relative to best bid reward - traded_volume*best_bid
         return self._get_obs(), reward, terminated, truncated, {}
     
-    def _book_shape(self):
+    def _book_shape(self,level=10):
         # volume of first 3 levels on bid and ask side 
         reference = np.array([365, 1080, 1684], dtype=np.float32)
-        bid_prices, bid_volumes = self.level2(side='bid', level=3)
-        ask_prices, ask_volumes = self.level2(side='ask', level=3)
+        bid_prices, bid_volumes = self.level2(side='bid', level=level)
+        ask_prices, ask_volumes = self.level2(side='ask', level=level)
         #   
         bid_volumes = np.array(bid_volumes, dtype=np.float32)
         ask_volumes = np.array(ask_volumes, dtype=np.float32)
@@ -809,7 +817,7 @@ class Market(gym.Env):
         allocations = self._find_order_allocation()
         first_part = np.array([time, volume, price_drift, imbalance], dtype=np.float32)
         #
-        volumes = self._book_shape()
+        volumes = self._book_shape(level=3)
         return np.concatenate((first_part, allocations, volumes))
         # return (np.array([time], dtype=np.float32), self.volume, price_drift, np.array([imbalance], dtype=np.float32))
 
@@ -1016,15 +1024,11 @@ if __name__ == '__main__':
     # note: 
     # - logging or not makes difference in time
     # - cancellation of far out orders makes difference in time 
+    # - env type: simple, imbalance, down
     import time 
     start = time.time()
-    # env type: simple, imbalance, down
     config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10, 'env_type': 'down'}
     Market = Market(config=config)
-    # check_env(Market)
-    # assert (np.array([0.5], dtype=np.float32), -1) in Market.observation_space
-    # assert (np.array([0.5], dtype=np.float32), Market.initial_level) in Market.observation_space
-    # assert (np.array([0.5], dtype=np.float32), Market.initial_level+1) not in Market.observation_space
     rewards = []
     times = []
     shortfalls = []
@@ -1050,7 +1054,6 @@ if __name__ == '__main__':
             # action = Market.action_space.sample()            
             # action = np.array([0, 1, 0, 0], dtype=np.float32)
             action = np.array([-10, 10, -10, -10], dtype=np.float32)
-            # action = 2
             assert action in Market.action_space
             observation, reward, terminated, truncated, info = Market.step(action)
             # print(observation)
@@ -1058,7 +1061,7 @@ if __name__ == '__main__':
             # print(Market.observation_space.shape)
             r += reward
             # (time, volume, price, imbalance)            
-            # print(f'observation is {observation}')
+            # print(f'observation is {observation}'
             volumes.append(Market.volume)
             q.append(observation[3])
             l.append(observation[1])
@@ -1070,42 +1073,13 @@ if __name__ == '__main__':
         assert Market.volume == 0 
 
     elapsed = time.time()-start
-    # print(volumes)
-    # print(rewards)
     print(f'time elapsed in seconds: {elapsed}')
-    # print(shortfalls)
-    # print(times)
-    # plt.figure()
-    # Market.plot_prices()
-    # plt.savefig('prices.png')
-    # plt.savefig('prices.png')
-    # plt.plot(q)
-    # plt.figure()
-    # plt.plot(l)
-    # plt.savefig('queue.png')
-
-    # print(f'average reward is {np.mean(rewards)}')
-    # print(f'max reward is {np.max(rewards)}')
-    # print(f'min reward is {np.min(rewards)}')
-    # print('done')
-
     rewards = np.array(rewards)
     np.save('rewards_benchmark_100_lots', rewards)
-
     print(f'mean reward is {np.mean(rewards)}')
     print(f'max reward is {np.max(rewards)}')
     print(f'min reward is {np.min(rewards)}')
     
-    
-
-# performance of the benchmark strategy is around 6.9 
-# policy gradient can match 6.9 with dirichlet policy, 
-# this was not dirichlet, it was just gaussian with softmax applied within the environment 
-# pure dirichlet does not seem to be working yet 
-
-
-# performance of benchmark strategy for 100 lots 
-
 
 
 
