@@ -27,7 +27,7 @@ market_orders = []
 for n in range(N):
     if n%10000 == 0:
         print(n)
-    M.logging()
+    M.log_shape()
     out = M.generate_order()
     # print(out)
     M.log_trade(out)
