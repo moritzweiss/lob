@@ -79,7 +79,11 @@ class Market(gym.Env):
         self.cancel_intensities = 1e-3*np.array([0.8636, 0.4635, 0.1487, 0.1096, 0.0402, 0.0341, 0.0311, 0.0237, 0.0233, 0.0178, 0.0127, 0.0012, 0.0001])
         self.cancel_intensities = np.pad(self.cancel_intensities, (0,30-len(self.cancel_intensities)), 'constant', constant_values=(0))
         self.market_intesity = 0.1237
-        shape = np.load('/u/weim/lob/data/stationary_shape.npz')
+        # TODO: add run configs at the top of the file 
+        if config['ada']:
+            shape = np.load('/u/weim/lob/data/stationary_shape.npz')
+        else:
+            shape = np.load('/Users/weim/projects/lob/data/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
 
@@ -914,183 +918,25 @@ class Market(gym.Env):
         return None
     
 
-    ## plotting methods 
-
-    # plot heat map od the order book 
-    def heat_map(self):
-        N = 128
-        lightness = 108
-        reds = np.ones((N, 4))
-        reds[:, 0] = np.linspace(1, 1, N)
-        reds[:, 1] = np.linspace(lightness / N, 0, N)
-        reds[:, 2] = np.linspace(lightness / N, 0, N)
-        blues = np.ones((N, 4))
-        blues[:, 0] = np.linspace(0, lightness / N, N)
-        blues[:, 1] = np.linspace(0, lightness / N, N)
-        blues[:, 2] = np.linspace(1, 1, N)
-        newcolors = np.vstack([blues, reds])
-        cmp = ListedColormap(newcolors)
-
-        max_level = 30
-        N = len(self.bid_prices)
-        time = np.arange(N)
-        extended_time = []
-        prices = np.hstack((np.hstack(self.bid_prices),np.hstack(self.ask_prices)))
-        # prices = np.hstack(self.ask_prices)
-        volumes = np.hstack((-1*np.hstack(self.bid_volumes),np.hstack(self.ask_volumes)))
-        # volumes = np.hstack(self.ask_volumes)
-
-        for n in range(N):
-            # bid side   
-            # prices.extend(list(range(self.ask_prices[n]-1, self.ask_prices[n] - max_level - 1, -1)))
-            # volumes.extend([-1*x for x in self.lob_shape_history['bid'][n][:max_level]])
-            extended_time.extend(max_level*[time[n]])
-        for n in range(N):
-            extended_time.extend(max_level*[time[n]])
-            # bid side 
-            # prices.extend(list(range(self.bid_prices[n]+1, self.bid_prices[n] + max_level + 1, 1)))
-            # volumes.extend(self.lob_shape_history['ask'][n][:max_level])
-            # extended_time.extend(max_level*[time[n]])
-        sc = plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-2000, vmax=2000)
-        # sc = plt.scatter(extended_time, prices, c=volumes, cmap=cmp, vmin=-2000, vmax=2000)
-        plt.plot(time, self.best_ask_prices, '-', color='black', linewidth=3)
-        plt.plot(time, self.best_bid_prices, '-', color='black', linewidth=3)
-        # set x and y limits 
-        plt.ylim(bottom=995, top=1005)
-        ## plot micro price 
-        # ask = np.array(self.ask_prices)
-        # bid = np.array(self.bid_prices)
-        # ask_volume = np.array(self.ask_volumes)
-        # bid_volume = np.array(self.bid_volumes)
-        # micro_price = (ask*bid_volume + bid*ask_volume)/(ask_volume + bid_volume)
-        # plt.plot(time, micro_price, '-', color='grey', linewidth=2)
-        ## plot market orders        
-        market_ask = []    
-        volumes = []    
-        for x in self.trades:
-            if x is None:
-                market_ask.append(False)
-                volumes.append(0)
-            elif x[0] == 'bid':
-                market_ask.append(False)
-                volumes.append(x[1])
-            else:
-                market_ask.append(True)
-                volumes.append(x[1])
-
-        market_bid = []
-        for x in self.trades:
-            if x is None:
-                market_bid.append(False)
-            elif x[0] == 'ask':
-                market_bid.append(False)
-            else:
-                market_bid.append(True)
-
-        best_asks = np.array(self.best_ask_prices)
-        best_bids = np.array(self.best_bid_prices)
-        volumes = np.array(volumes)
-
-        best_ask_volumes = np.array(self.ask_volumes)
-        best_bid_volumes = np.array(self.bid_volumes)
-        ## updward facing triangle in scatter
-        # plt.scatter(time[market_bid], ask[market_bid], color='black', marker='^', s=80)
-        plt.scatter(time[market_ask], best_asks[market_ask], color='black', marker='^', s=0.5*volumes[market_ask]) 
-        plt.scatter(time[market_bid], best_bids[market_bid], color='black', marker='v', s=0.5*volumes[market_bid])
-        # plt.xlim(left=time[0], right=time[-1])
-        # plt.colorbar(sc)
-        # plt.tight_layout()
-        return None  
-
-    # plot order book 
-    def plot_level2_order_book(self, level=30, side='bid'):
-        bid_prices, bid_volumes = self.level2(level=level, side='bid')
-        ask_prices, ask_volumes = self.level2(level=level, side='ask')
-        plt.figure()
-        plt.bar(bid_prices, bid_volumes, color='b')
-        plt.bar(ask_prices, ask_volumes, color='r')
-    
-    # plot average shape of order book 
-    def plot_average_book_shape(self):
-        """
-        - plots average book shape.
-        - if there is no config file, it saves the average book shape and other simulation parameters to a pickle file.
-        """
-        # book_shape['config'] = {'L': self.L, 'LR': self.LR, 'MR': self.MR, 'CR': self.CR}
-        book_shape_bid = np.mean(self.bid_volumes, axis=0)
-        book_shape_ask = np.mean(self.ask_volumes, axis=0)
-
-        # np.savez('cont_model/stationary_shape', bid=book_shape_bid, ask=book_shape_ask)
-
-        # _ = outfile.seek(0)
-
-        # npzfile = np.load(outfile)
-
-        # sorted(npzfile.files)
-        # ['x', 'y']
-
-        # npzfile['x']
-        # array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-
-        plt.figure()
-        plt.bar(range(0,-30,-1), book_shape_bid, color='red', label='bid')
-        plt.bar(range(1,31,1), book_shape_ask, color='blue', label='ask')
-        plt.legend(loc='upper right')
-        plt.xlabel('relative distance to mid price')
-        plt.ylabel('average volume')
-    
-    # plot prices 
-    def plot_prices(self):
-        """
-        the method plots 
-            - bid and ask prices 
-            - microprice 
-            - trades on bid and ask (larger trade with larger marker size)            
-        """
-
-        bid_prices = np.array(self.best_bid_prices)
-        ask_prices = np.array(self.best_ask_prices)
-        bid_volume = np.array(self.best_bid_volumes)
-        ask_volume = np.array(self.best_ask_volumes)
-        microprice = (bid_prices * ask_volume + ask_prices * bid_volume) / (bid_volume + ask_volume)
-        time = np.arange(0, len(bid_prices))
-
-
-        trades = [x[0] if x is not None else False for x in self.trades]
-        bid_mask = [True if x == 'bid' else False for x in trades]
-        ask_mask = [True if x == 'ask' else False for x in trades]
-
-        plt.figure()
-        plt.plot(time, bid_prices, '--', color='grey')
-        plt.plot(time, ask_prices, '--', color='grey')
-        plt.plot(time, microprice, '-', color='blue')
-
-        plt.scatter(time[bid_mask], bid_prices[bid_mask], color='red', marker='x')
-        plt.scatter(time[ask_mask], ask_prices[ask_mask], color='green', marker='x')
-        
-        return None 
-
-
-
 
 if __name__ == '__main__': 
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_volume': 500, 'env_type': 'simple'}
-    Market = Market(config=config)
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_volume': 500, 'env_type': 'simple', 'ada':False}
+    M = Market(config=config)
     print(f'initial volume is {config["initial_volume"]}')
     rewards = []
-    for n in range(100):
-        observation, _ = Market.reset()
-        assert observation in Market.observation_space 
+    for n in range(10):
+        observation, _ = M.reset()
+        assert observation in M.observation_space 
         terminated = truncated = False 
         reward_per_episode = 0 
         while not terminated and not truncated: 
             action = np.array([0, 1, 0, 0, 0], dtype=np.float32)
-            assert action in Market.action_space
-            observation, reward, terminated, truncated, info = Market.step(action, transform_action=False)
-            assert observation in Market.observation_space
+            assert action in M.action_space
+            observation, reward, terminated, truncated, info = M.step(action, transform_action=False)
+            assert observation in M.observation_space
             reward_per_episode += reward
         rewards.append(reward_per_episode)
-        assert Market.volume == 0 
+        assert M.volume == 0 
 
     print(f'mean reward is {np.mean(rewards)}')
     print(f'max reward is {np.max(rewards)}')
