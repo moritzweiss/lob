@@ -13,6 +13,20 @@ import gymnasium as gym
 from gymnasium.utils.env_checker import check_env
 from ray.rllib.utils.spaces.simplex import Simplex
 
+def action_to_n_orders(action, volume):
+    available_volume = volume
+    target_n_orders = []
+    for l in range(len(action)):
+        # starts at zero, runs up to self.n_levels+1
+        # [0,1,...,self.n_levels+1]: first one if for market order, last one is for inactive volume
+        # np.round rounds values in [0,0.5] to 0, and values in [0.5,1] to 1 
+        n_orders_on_level = min(np.round(action[l]*volume).astype(int), available_volume)
+        available_volume -= n_orders_on_level
+        target_n_orders.append(n_orders_on_level) 
+    target_n_orders[-1] += available_volume
+    assert available_volume >= 0 
+    assert sum(target_n_orders) == volume
+    return target_n_orders
 
 class PeggingAgent:
     # observation space = action space = [-1,0,1,2,3,4] corresponding to market order and levels 
@@ -39,10 +53,8 @@ class SubmitAndLeaveAgent:
 class Market(gym.Env):
 
     def __init__(self, config):
-        
-        # if true transform actions to the simplex 
-        # should be set to False for some benchmark agents 
-        
+
+        # global initializations        
         if config['env_type'] == 'simple':
             self.imbalance_trader = False
             self.drift_down = False
@@ -55,45 +67,18 @@ class Market(gym.Env):
         else:
             raise ValueError('env_type not supported')
         
-        # config is dict with entries {'total_n_steps', 'log', 'initial_level'}
-        # initial_level places the limit order at best_ask + initial_level 
-        # also determines the dimension of observation space and action space as [-1,0,1, ... ,initial_level]
-
         self.np_random = np.random.default_rng(config['seed'])
-
-        # only for the linear strategy 
-        self.withhold_volume = 0 
-        # self.total_volume = config['initial_volume']
-
-        # drift 
-        # self.drift_down = config['drift_down']
-
-        ## order book related attributes
-        self.order_map = {}
-        self.price_map = {'bid': SortedDict(neg), 'ask': SortedDict()}
         self.market_agent_id = 'market_agent'
         self.agent_id = 'agent'
-
-        # update_n increases every time the the order book is updated 
-        # not necessarily the same as time 
-        # there might be multiple updates at the same time (example: several orders get cancelled at the same time, several orders are filled by a market order) 
-        # actions submitted by a single agent all happen at the same time 
-        self.update_n = 0 
-        self.volume = config['initial_volume']
         self.initial_volume = config['initial_volume']
+        self.total_n_steps = config['total_n_steps']
 
-        # time updates after agent order is process or after market order is process 
-        self.time = 0 
-
-        ## market related attributes
+        # market related attributes
         self.limit_intensities = np.array([0.2842, 0.5255, 0.2971, 0.2307, 0.0826, 0.0682, 0.0631, 0.0481, 0.0462, 0.0321, 0.0178, 0.0015, 0.0001])
         self.limit_intensities = np.pad(self.limit_intensities, (0,30-len(self.limit_intensities)), 'constant', constant_values=(0))
         self.cancel_intensities = 1e-3*np.array([0.8636, 0.4635, 0.1487, 0.1096, 0.0402, 0.0341, 0.0311, 0.0237, 0.0233, 0.0178, 0.0127, 0.0012, 0.0001])
         self.cancel_intensities = np.pad(self.cancel_intensities, (0,30-len(self.cancel_intensities)), 'constant', constant_values=(0))
         self.market_intesity = 0.1237
-        
-        # self.initial_shape = np.ones(30)*500
-
         shape = np.load('/u/weim/lob/data/stationary_shape.npz')
         self.initial_shape = np.mean([shape['bid'], shape['ask']], axis=0)
         self.initial_shape = np.rint(self.initial_shape).astype(int)
@@ -103,38 +88,21 @@ class Market(gym.Env):
         self.limit_volume_parameters = {'mean':4.47, 'sigma': 0.83}
         self.cancel_volume_parameters = {'mean':4.48, 'sigma': 0.82}
 
-        ## action and observation space settings 
-        # observation space = [0,1,2]
-        self.initial_level = config['initial_level']
-        # time, volume, price drift from -3 to 3, imbalance 
-        self.observation_space = Tuple(( Box(0,1), Discrete(self.initial_volume+1, start=0), Discrete(7), Box(0,1)))
-        # time, volume, price drift, imbalance, 4 times allocation, 6 times volume  
-        # time, volume, price drift, 4 times allocation, 5 times volume 
-
-        self.observation_space = Box(low=-1, high=1, shape=(14,)) 
-        # self.action_space = Discrete(self.initial_level+2, start=-1)
-        # action space: values between in R for the levels [-1,0,1,2]
-        self.action_space = Box(low=-10, high=10, shape=(4,), dtype=np.float32, seed=config['seed'])
+        # observation space, action space 
+        # 4 features: time, volume, price drift, imbalance , 
+        # 5 allocations: [1,2,3,4:overflow, 5:inactive], 
+        # 6 volumes [1,2,3] bid/ask, total = 4+5+6 = 15
+        # self.n_levels describes on which levels we place, currently pace on 3 levels 
+        self.n_levels = 3 
+        self.n_actions = self.n_levels+2
+        n_observations = 4+(self.n_levels+2)+2*(self.n_levels) #=4+4+6=15
+        assert n_observations == 15
+        self.observation_space = Box(low=-1, high=1, shape=(n_observations,)) 
+        self.action_space = Box(low=-10, high=10, shape=(self.n_levels+2,), dtype=np.float32, seed=config['seed'])
         # self.action_space = Simplex(shape=(4,), concentration=np.array([1] * 4), dtype=np.float32)
-
-
-
-        ## logging 
         self.log = config['log']
-        self.bid_volumes = []
-        self.ask_volumes = []
-        self.bid_prices = []
-        self.ask_prices = []
-        self.trades = []
 
-        self.best_bid_prices = []
-        self.best_ask_prices = []
-        self.best_bid_volumes = []
-        self.best_ask_volumes = []
-
-        self.time = 0 
-
-        self.total_n_steps = config['total_n_steps']
+        
 
     ## order book related methods 
     def process_order(self, order):
@@ -551,134 +519,203 @@ class Market(gym.Env):
     ## gym methods 
 
     def reset(self, seed=None, options=None, initialize_orders=True):
+        """
+        - initialize order and price map, set of active orders
+        - reset time and update_n to zero 
+        - reset volume to initial volume         
+        - reset log variables 
+        """
+
         super().reset(seed=seed)
-        
-        # empty the order book and initialize 
+
         self.order_map = {}
         self.price_map = {'bid': SortedDict(neg), 'ask': SortedDict()}
-        self.initialize_book()
-        self.initial_ask = self.get_best_price(side='ask')
-        self.initial_bid = self.get_best_price(side='bid')
-        self.initial_mid_price = (self.initial_ask + self.initial_bid)/2
-        self.active_orders = set()
+        self.update_n = 0 
+        self.time = 0 
 
-        # reset volume 
+        # order information 
+        self.active_volume = 0
+        self.inactive_volume = self.initial_volume
         self.volume = self.initial_volume
+        self.active_orders = set()
+        self.active_orders_within_first_levels = set()
+        # n orders describes the number of the agents orders on each level. 
+        # TODO: write this into a function called get_order_info. 
+        # the function should summarize all the information on the current agents orders. location, queue position. 
+        self.n_orders = []        
+        assert self.volume > 0 
+        self.initialize_book()
 
-        # submit 10 limit orders to the second ask level in the book 
-        # place orders as single lots 
-        best_ask = self.get_best_price(side='ask')
-        if initialize_orders:
-            for _ in range(self.volume):
-                order = {'agent_id':self.agent_id , 'type':'limit', 'side':'ask', 'price':best_ask+self.initial_level, 'volume':1} 
-                out = self.process_order(order)
-                self.active_orders.add(out[1])
-        else:
-            pass
+        # update_n increases every time the the order book is updated 
+        # not necessarily the same as time 
+        # there might be multiple updates at the same time (example: several orders get cancelled at the same time, several orders are filled by a market order) 
+        # actions submitted by a single agent all happen at the same time, sequentially  
+        # time updates after agent order is process or after market order is process 
+    
+        # n levels for ation and observation space 
+        # levels: 0:market order, 1:first level, ..., 3-th level, 4: inactive level 
+        # shape of levels 1, to, 3
+
+
+        ## logging 
+        if self.log:
+            self.bid_volumes = []
+            self.ask_volumes = []
+            self.bid_prices = []
+            self.ask_prices = []
+            self.trades = []
+
+            self.best_bid_prices = []
+            self.best_ask_prices = []
+            self.best_bid_volumes = []
+            self.best_ask_volumes = []
+                
+            self.initial_ask = self.get_best_price(side='ask')
+            self.initial_bid = self.get_best_price(side='bid')
+            self.initial_mid_price = (self.initial_ask + self.initial_bid)/2
+
+        
+        # best_ask = self.get_best_price(side='ask')
+        # if initialize_orders:
+        #     for _ in range(self.volume):
+        #         order = {'agent_id':self.agent_id , 'type':'limit', 'side':'ask', 'price':best_ask+self.initial_level, 'volume':1} 
+        #         out = self.process_order(order)
+        #         self.active_orders.add(out[1])
+        # else:
+        #     pass
         # self.active_order = out[1]
         # self.level = level
 
-        # reset logging 
-        self.bid_volumes = []
-        self.ask_volumes = []
-        self.bid_prices = []
-        self.ask_prices = []
-        self.trades = []
-
-        self.best_bid_prices = []
-        self.best_ask_prices = []
-        self.best_bid_volumes = []
-        self.best_ask_volumes = []
-
-        # reset time 
-        self.time = 0 
 
         return self._get_obs(), {}
     
     def _get_reward(self, reward, traded_volume):
         return 1000*(reward - self.initial_bid*traded_volume)/(self.initial_volume*self.initial_bid)
 
-    def _find_order_allocation(self):
+    def _get_agents_order_distribution(self):
         """
-        - find order allocation for observation 
+        - find order distribution of currently active orders
+        - that is the distribution of orders on levels [1, 2, ..., self.n_levels]
+        - e.g self.n_levels = 3
+            - volume = 10 
+            - action space is [a0=market, a1, a2, a3, a4=inactive]
+            - observation is [o1, o2, o3, o4=inactive]            
+            - orders = [5,2,2,1]
+            - order_distribution = orders/sum(orders)
+        - output:
+            - n_orders describes the number of agent orders per price level
+            - active_orders_within_levels is a set of order ids which are within the first self.n_levels levels
         """
         best_bid = self.get_best_price(side='bid')
-        allocations = 4*[0]
-        for l in [0, 1, 2, 3]:
+        n_orders_within = []
+        active_orders_within_levels = set()
+        for l in range(0, self.n_levels):
+            # this goes from 0 to self.n_levels-1 inclusive
             orders_on_level = 0
             if best_bid+l+1 in self.price_map['ask']:
+                # TODO: copy is probably not necessary here 
                 level = self.price_map['ask'][best_bid+l+1].copy()
                 for order_id in level:
                     if self.order_map[order_id]['agent_id'] == 'agent':                        
                         orders_on_level += 1 
-                allocations[l] = orders_on_level
-        remaining_volume = self.volume - sum(allocations)
-        assert remaining_volume >= 0
-        allocations[-1] += remaining_volume
-        allocations = np.array(allocations, dtype=np.float32)
-        if self.volume > 0:
-            allocations /= self.volume
-        elif self.volume == 0:
-            pass
-        else:
-            raise ValueError('volume is negative')
-        return allocations
+                        active_orders_within_levels.add(order_id)
+                n_orders_within.append(orders_on_level)
+            else:
+                n_orders_within.append(0)
+        # active remaining volume = volume which is still posted in the book, but not on the first three levels 
+        assert self.volume == self.active_volume + self.inactive_volume
+        # active remaining volume is the volume which is still posted in the book, but not on the first self.n_levels levels
+        n_orders_outside = self.active_volume - sum(n_orders_within) 
+        # add volume beyond the first three levels to the third level
+        assert n_orders_outside >= 0
+        assert len(n_orders_within) == self.n_levels
+        assert n_orders_outside + sum(n_orders_within) == self.active_volume
+        assert self.volume == self.active_volume + self.inactive_volume
+        return n_orders_within, n_orders_outside, active_orders_within_levels
     
-    def _find_allocation(self, action, additional_lots=0):
-        ## find vector of allocations
-        # action = np.exp(action)/np.sum(np.exp(action))
-        # action = np.array([0,0,0,1], dtype=np.float32)
-        # note: this gets passed by copy not by reference 
-        # assert np.all(action >= 0)
-        # assert np.sum(action) == 1 
-        available_volume = self.volume
-        best_bid = self.get_best_price(side='bid')
-        allocations = []
-        for l in [0,1,2,3]:
-            allocation = min(np.round(action[l]*self.volume).astype(int), available_volume)
-            available_volume -= allocation
-            allocations.append(allocation) 
-        allocations[-1] += available_volume
-        assert sum(allocations) == self.volume
+    def process_order_for_agent(self, order_type, side=None, price=None, order_id=None):
+        """
+        - process agent orders
+        - modify active/inactive volume
+        """
+        if order_type == 'cancellation':
+            order = {'type': 'cancellation', 'order_id': order_id, 'agent_id': 'agent'}
+            self.process_order(order)
+            self.inactive_volume += 1
+            self.active_volume -= 1
+        return None
 
-        # cancel orders, find out which new limit order should be placed
-        active_orders_within = set()
-        available_volume = 0 
-        new_orders = 4*[0]
-        new_orders[0] = allocations[0]
-        total_resting_orders = 0 
-        for l in [1, 2, 3]:
-            orders_on_level = 0 
-            if best_bid+l in self.price_map['ask']:
-                level = self.price_map['ask'][best_bid+l].copy()
-                for order_id in level:
-                    if self.order_map[order_id]['agent_id'] == 'agent':                        
-                        orders_on_level += 1 
-                        if orders_on_level > allocations[l]:
-                            order = {'type': 'cancellation', 'order_id': order_id, 'agent_id': 'agent'}
-                            self.process_order(order)
-                            self.active_orders.remove(order_id)
-                            available_volume += 1
-                        else:
-                            active_orders_within.add(order_id)
-            total_resting_orders += orders_on_level
-            new_orders[l] = max(0, allocations[l] - orders_on_level)
-        if available_volume < sum(new_orders):
-            active_orders = self.active_orders.copy()
-            for order_id in active_orders.difference(active_orders_within):
-                order = {'type': 'cancellation', 'order_id': order_id, 'agent_id': 'agent'}
-                self.process_order(order)
-                self.active_orders.remove(order_id)
-                available_volume += 1 
-        # assert available_volume == sum(new_orders)
-        return new_orders
+    def _send_orders(self, action, additional_lots=0):
+        """
+        - find orders to be placed
+        - example: current orders are [3,2,4,1], new action is [6,2,1,1], add orders to 2 first level, cancel 2 orders on the third level, leave other orders unchanged
+        """
 
-    def step(self, action=None, no_action=False, additional_lots=0, transform_action=True):
+        ## cancel orders beyond the first self.n_levels 
+        for order_id in self.active_orders.difference(self.order_info['order_ids_within_first_levels']):
+            order = {'type': 'cancellation', 'order_id': order_id, 'agent_id': 'agent'}
+            # TODO removal of order_id should be automatic within process order method 
+            self.process_order(order)
+            self.active_orders.remove(order_id)
+            self.inactive_volume += 1
+            self.active_volume -= 1 
+        assert self.volume == self.active_volume + self.inactive_volume
+
+        ##  
+        target_n_orders = action_to_n_orders(action=action, volume=self.volume)
+        # self.n_orders[-1] inactive orders, self.n_orders[-2] orders beyond first self.n_levels levels
+        current_order_distribution = [0]+self.order_info['distribution_first_levels']+[self.inactive_volume]
+        assert sum(current_order_distribution) == self.volume
+        assert len(target_n_orders) == len(current_order_distribution)
+        difference = [target_n_orders[n]-current_order_distribution[n] for n in range(len(current_order_distribution))]
+        
+        ## send limit orders and cancellations
+        for n, level in zip(difference[1:-1], range(1, self.n_levels+1)):
+            if n > 0:
+                for _ in range(n):
+                    # TODO: allow for limit order placement of size > 1
+                    # TODO: 
+                    order = {'agent_id': 'agent', 'type': 'limit', 'volume': 1, 'side': 'ask', 'price': self.get_best_price('bid')+level}
+                    out = self.process_order(order)
+                    self.active_orders.add(out[1])
+                    # this is not needed, can do in terms of active orders 
+                    self.active_volume += 1
+                    self.inactive_volume -= 1
+            elif n < 0:
+                m = 0 
+                price_level = self.price_map['ask'][self.get_best_price('bid')+level].copy()
+                # cancel worst n orders on the price level 
+                for order_id in price_level[::-1]:
+                    if self.order_map[order_id]['agent_id'] == 'agent':
+                        order = {'agent_id': 'agent', 'type': 'cancellation', 'volume': 1, 'order_id': order_id}
+                        self.process_order(order)
+                        self.active_orders.remove(order_id)
+                        self.active_volume -= 1
+                        self.inactive_volume += 1
+                        m += 1
+                    if m == -n:
+                        break
+            else:
+                pass
+        
+        assert self.volume == self.active_volume + self.inactive_volume
+        assert difference[0] == self.inactive_volume
+        
+        ## send market order
+        if difference[0] > 0:
+            order = {'agent_id': 'agent', 'type': 'market', 'volume': difference[0], 'side': 'bid'}
+            out = self.process_order(order)
+        else:
+            out = None 
+
+        return out  
+
+    def step(self, action=None, transform_action=True):
         # warning: changed drift
         """
         the method returns observation, reward, terminated, truncated, info
         """
-
+        assert len(action) == self.n_levels+2, "action must be of length n_levels + 2, additional 2 for market order and withholding volume"
         # transform action to allocation
         # TODO: softmax should be applied directly in the distribution class
         if transform_action:
@@ -697,39 +734,27 @@ class Market(gym.Env):
         truncated = False
         terminated = False        
 
-        if no_action:
-            pass
-        else:
-            if additional_lots == 0:
-                new_orders = self._find_allocation(action=action)
-            else:
-                new_orders = [0, additional_lots, 0, 0]
+        # agent trades 
+        # log shape of the book before trade
 
-            # send market order 
-            if new_orders[0] > 0:
-                order = {'agent_id': self.agent_id, 'type': 'market', 'volume': new_orders[0], 'side': 'bid'}                          
-                out = self.process_order(order)
-                # add relative rewards here 
-                reward += self._get_reward(reward=out[2], traded_volume=new_orders[0])
-                self.volume -= new_orders[0]
-                assert self.volume >= 0  
-                if self.volume == 0 and self.withhold_volume == 0:
-                    # review the following. how to calculate reward ? 
-                    terminated = True
-                    return self._get_obs(), reward, terminated, truncated, {}
-
-            # send new limit orders 
-            for n_orders, level in zip(new_orders[1:], [1,2,3]):
-                for _ in range(n_orders):
-                    order = {'agent_id': self.agent_id, 'type': 'limit', 'volume': 1, 'side': 'ask', 'price': self.get_best_price('bid')+level}
-                    out = self.process_order(order)
-                    self.active_orders.add(out[1])
-                    assert out[1] in self.order_map
-
-        # market transitions 
-        for _ in range(100):
+        if self.log:
+            self.log_shape()
+        out = self._send_orders(action=action)
+        self.time += 1
+        if out is not None:
+            reward += self._get_reward(reward=out[2], traded_volume=out[3]['volume'])                                                
+        if self.log:
+            self.log_trade(out)
+        assert self.volume >= 0
+        assert self.volume == self.active_volume + self.inactive_volume
+        if self.volume == 0:
+            terminated = True
+            return self._get_obs(), reward, terminated, truncated, {}
+            
+        # market trades
+        for _ in range(99):
             if self.log:
-                self.logging()
+               self.log_shape()
 
             out = self.generate_order() 
             self.time += 1
@@ -737,12 +762,9 @@ class Market(gym.Env):
                 self.log_trade(out)
 
             assert self.time <= self.total_n_steps
+
             # cancel far out orders
             # self.cancel_far_out_orders()
-
-            # for order in self.active_orders:
-            #     assert order in self.order_map
-
             # check if limit orders of agent are filled
             if out[0] == 'market':
                 if out[1]['agent']:
@@ -751,40 +773,51 @@ class Market(gym.Env):
                         reward += self._get_reward(reward=order['price'], traded_volume=1)
                         self.active_orders.remove(order['order_id'])
                         self.volume -= 1
+                        # TODO: this is not necessary, can do in terms of active orders
+                        self.active_volume -= 1
                     assert self.volume >= 0  
-                    if self.volume == 0 and self.withhold_volume==0:
+                    assert self.active_volume >= 0
+                    if self.volume == 0:
                         terminated = True         
                         return self._get_obs(), reward, terminated, truncated, {}
             
-            # for order in self.active_orders:
-            # assert order in self.order_map
+            for order in self.active_orders:
+                assert order in self.order_map  
 
-            if self.drift_down:
-                order = {'agent_id': self.market_agent_id, 'type': 'market', 'side': 'bid', 'volume': 1}
-                self.process_order(order)
-            else:
-                pass
+            # TODO: add drift later 
+            # if self.drift_down:
+            #     order = {'agent_id': self.market_agent_id, 'type': 'market', 'side': 'bid', 'volume': 1}
+            #     self.process_order(order)
+            # else:
+            #     pass
 
             # handle terminal time 
             if self.time == self.total_n_steps:
-                assert self.withhold_volume == 0 
                 truncated = True
+                terminated = True
                 # remove active orders from the book 
                 assert len(self.active_orders) == self.volume 
                 for order in self.active_orders:
                     self.process_order({'type': 'cancellation', 'order_id': order, 'agent_id': 'agent'})
+                    # TODO: remove active and inactive logic 
+                    self.active_volume -= 1
+                    self.inactive_volume += 1                    
                 # send remaining volume as market order 
+                assert self.active_volume == 0
+                assert self.inactive_volume == self.volume
                 order = {'agent_id': self.agent_id, 'type': 'market', 'volume': self.volume, 'side': 'bid'}
-                out = self.process_order(order )
+                out = self.process_order(order)
                 reward += self._get_reward(out[2], self.volume)
-                self.volume = 0 
+                self.volume = self.inactive_volume = 0 
                 return self._get_obs(), reward, terminated, truncated, {}
             
         # measure reward relative to best bid reward - traded_volume*best_bid
         return self._get_obs(), reward, terminated, truncated, {}
     
     def _book_shape(self,level=10):
+        # warning!: this only works for 3 levels at the moment         
         # volume of first 3 levels on bid and ask side 
+        # use initial shape to do this ! 
         reference = np.array([365, 1080, 1684], dtype=np.float32)
         bid_prices, bid_volumes = self.level2(side='bid', level=level)
         ask_prices, ask_volumes = self.level2(side='ask', level=level)
@@ -799,26 +832,43 @@ class Market(gym.Env):
 
     def _get_obs(self):
         '''
-        - returns: (time, volume, price, imbalance)
+        - the components are (time, agents remaining volume, price, imbalance, agents order allocations, shape of the book).
+        - order allocations are [pi(1), ..., pi(N)], where pi(N) is the percentage of volume which was not placed yet, pi(n) is the allocation for levels n=1,...,N-1. 
+        - current shape of the book is [v_1, ..., v_{N-1}] for bid and ask side. the current shape of the book is normalized by the initial shape of the book.
+        - TODO: locations of orders in the book, this would replace the allocations. Not sure what the best way for this encoding is.         
+        - Market drift: as a numerical features (strategic setting)
+        - Note: all features are treated as continuous, not one hot encoded
+        - all features are normalized to [0,1]
+        - general question, can we make the asset more small tick, i.e. with smaller queue sizes 
         '''
+
+        ### features 
         time = self.time/self.total_n_steps
         volume = self.volume/self.initial_volume
         mid_price = (self.get_best_price('ask') + self.get_best_price('bid'))/2
         price_drift = 100*(mid_price  - self.initial_mid_price)/self.initial_mid_price
-        # limit price drift to [-1, 1]
         price_drift = min(1.0, price_drift)
         price_drift = max(-1.0, price_drift)
-        # time = self.total_n_steps*time  
-        # time = np.rint(time/100).astype(np.int32)
-        # imbalance 
         bid_volume = self._get_best_volume(side='bid')
         ask_volume = self._get_best_volume(side='ask')
         imbalance = ask_volume/(bid_volume+ask_volume)
-        allocations = self._find_order_allocation()
         first_part = np.array([time, volume, price_drift, imbalance], dtype=np.float32)
-        #
-        volumes = self._book_shape(level=3)
-        return np.concatenate((first_part, allocations, volumes))
+        # order information 
+        n_orders_within, n_orders_outside, active_order_ids_within = self._get_agents_order_distribution()      
+        assert self.volume == sum(n_orders_within) + n_orders_outside + self.inactive_volume
+        assert active_order_ids_within <= self.active_orders
+        allocation = np.array(n_orders_within+[n_orders_outside]+[self.inactive_volume], dtype=np.float32)
+        assert sum(allocation) == self.volume
+        if np.sum(allocation) == 0:
+            pass
+        else:
+            allocation /= np.sum(allocation)  
+        # find volumes 
+        volumes = self._book_shape(level=3)        
+        ### set attributed related to order information, TODO: could also move this into info 
+        self.order_info = {'distribution_first_levels': n_orders_within, 'order_ids_within_first_levels': active_order_ids_within}
+        assert self.volume == self.active_volume + self.inactive_volume
+        return np.concatenate((first_part, allocation, volumes))
         # return (np.array([time], dtype=np.float32), self.volume, price_drift, np.array([imbalance], dtype=np.float32))
 
     def _get_best_volume(self, side):
@@ -831,7 +881,7 @@ class Market(gym.Env):
         return v 
 
     ## logging 
-    def logging(self,order=None):
+    def log_shape(self,order=None):
         # TODO: store bid and ask volumes/prices as an attribute 
         # We need them at any step to generated orders 
         # Could also modify each price level one at a time. Would be more efficient
@@ -853,6 +903,9 @@ class Market(gym.Env):
         return None
         
     def log_trade(self, order):
+        if order is None:
+            self.trades.append(None)
+            return None
         if order[0] == 'market':
             # assert order[1]['market_agent'], f'print order: {order}'
             self.trades.append((order[3]['side'], order[3]['volume']))
@@ -1021,61 +1074,24 @@ class Market(gym.Env):
 
 
 if __name__ == '__main__': 
-    # note: 
-    # - logging or not makes difference in time
-    # - cancellation of far out orders makes difference in time 
-    # - env type: simple, imbalance, down
-    import time 
-    start = time.time()
-    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_level': 2, 'initial_volume': 10, 'env_type': 'down'}
+    config = {'total_n_steps': int(1e3), 'log': True, 'seed':0, 'initial_volume': 500, 'env_type': 'simple'}
     Market = Market(config=config)
-    rewards = []
-    times = []
-    shortfalls = []
-    volumes = []
-    volumes.append(config['initial_volume'])
     print(f'initial volume is {config["initial_volume"]}')
+    rewards = []
     for n in range(100):
-        # print(f'episode {n}')
-        if n%100 == 0:
-            print(f'episode {n}')
-        # Agent = SubmitAndLeaveAgent(level=0)
         observation, _ = Market.reset()
         assert observation in Market.observation_space 
-        observations = []
-        actions = [] 
-        q = []
-        l = []
-        r = 0 
         terminated = truncated = False 
+        reward_per_episode = 0 
         while not terminated and not truncated: 
-            # action = Agent.get_action(observation)
-            # action = 0
-            # action = Market.action_space.sample()            
-            # action = np.array([0, 1, 0, 0], dtype=np.float32)
-            action = np.array([-10, 10, -10, -10], dtype=np.float32)
+            action = np.array([0, 1, 0, 0, 0], dtype=np.float32)
             assert action in Market.action_space
-            observation, reward, terminated, truncated, info = Market.step(action)
-            # print(observation)
-            # print(observation.shape)
-            # print(Market.observation_space.shape)
-            r += reward
-            # (time, volume, price, imbalance)            
-            # print(f'observation is {observation}'
-            volumes.append(Market.volume)
-            q.append(observation[3])
-            l.append(observation[1])
-            shortfalls.append(observation[2])
-            times.append(Market.time)
+            observation, reward, terminated, truncated, info = Market.step(action, transform_action=False)
             assert observation in Market.observation_space
-            observations.append(observation)
-        rewards.append(r)
+            reward_per_episode += reward
+        rewards.append(reward_per_episode)
         assert Market.volume == 0 
 
-    elapsed = time.time()-start
-    print(f'time elapsed in seconds: {elapsed}')
-    rewards = np.array(rewards)
-    np.save('rewards_benchmark_100_lots', rewards)
     print(f'mean reward is {np.mean(rewards)}')
     print(f'max reward is {np.max(rewards)}')
     print(f'min reward is {np.min(rewards)}')
