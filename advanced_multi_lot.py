@@ -54,7 +54,7 @@ class Market(gym.Env):
 
     def __init__(self, config):
 
-        # global initializations        
+    # global initializations        
         if config['env_type'] == 'simple':
             self.imbalance_trader = False
             self.drift_down = False
@@ -107,8 +107,8 @@ class Market(gym.Env):
         self.log = config['log']
 
         
-
     ## order book related methods 
+
     def process_order(self, order):
         """
         - an order is a dictionary with fields agent_id, type, side, price, volume, order_id
@@ -290,6 +290,7 @@ class Market(gym.Env):
         order_id = order['order_id']
         self.order_map[order_id]['volume'] = order['volume']
         return 'modification', order_id
+
 
     ## simulation related methods
 
@@ -743,7 +744,7 @@ class Market(gym.Env):
 
         if self.log:
             self.log_shape()
-        out = self._send_orders(action=action)
+        out = self._send_orders(action)
         self.time += 1
         if out is not None:
             reward += self._get_reward(reward=out[2], traded_volume=out[3]['volume'])                                                
@@ -884,6 +885,7 @@ class Market(gym.Env):
             v += order['volume']
         return v 
 
+
     ## logging 
     def log_shape(self,order=None):
         # TODO: store bid and ask volumes/prices as an attribute 
@@ -907,11 +909,11 @@ class Market(gym.Env):
         return None
         
     def log_trade(self, order):
+        # assert order[1]['market_agent'], f'print order: {order}'
         if order is None:
             self.trades.append(None)
             return None
         if order[0] == 'market':
-            # assert order[1]['market_agent'], f'print order: {order}'
             self.trades.append((order[3]['side'], order[3]['volume']))
         else:
             self.trades.append(None)
