@@ -17,9 +17,9 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'ask', 102, 5)) #5
         [LOB.process_order(order) for order in orders]  
         assert len(LOB.data.orders) == 5
-        assert len(LOB.data.best_ask_prices) == 6
-        assert LOB.data.best_ask_prices == [np.nan, np.nan, np.nan, 101, 101, 101]
-        assert LOB.data.best_bid_prices == [np.nan, 99, 100, 100, 100, 100]
+        assert len(LOB.data.best_ask_prices) == 5
+        assert LOB.data.best_ask_prices == [np.nan, np.nan, 101, 101, 101]
+        assert LOB.data.best_bid_prices == [99, 100, 100, 100, 100]
         assert np.all(LOB.data.ask_volumes[-1] == np.array([5, 15, 0]))
         assert np.all(LOB.data.bid_volumes[-1] == np.array([5, 10, 0]))
         assert np.all(LOB.data.ask_prices[-1] == np.array([101, 102, 103]))
