@@ -34,6 +34,18 @@ class MarketOrder(Order):
     def __repr__(self):
         return f'MO(side: {self.side}, volume: {self.volume})'
 
+class CancellationByPriceVolume(Order):
+    def __init__(self, agent_id, side, price, volume):
+        super().__init__(agent_id, 'cancellation_by_price_volume')
+        assert side in ['bid', 'ask'], "side must be bid or ask"
+        assert volume > 0, "volume must be positive"
+        self.side = side
+        self.price = price
+        self.volume = volume
+        self.type = 'cancellation_by_price_volume'
+    def __repr__(self):
+        return f'CBPV(agent: {self.agent_id}, side: {self.side}, price: {self.price}, volume: {self.volume})'
+
 class Cancellation(Order):
     def __init__(self, agent_id, order_id):
         super().__init__(agent_id, 'cancellation')
@@ -82,6 +94,14 @@ class CancellationMessage(FillMessage):
         super().__init__(order, msg)
     def __repr__(self) -> str:
         return f'C(msg: {self.msg}, order: {self.order})'
+
+class CancellationByPriceVolumeMessage(FillMessage):
+    def __init__(self, order, msg, filled_orders, filled_volume):
+        super().__init__(order, msg)
+        self.filled_orders = filled_orders
+        self.filled_volume = filled_volume
+    def __repr__(self) -> str:
+        return f'CBPV(msg: {self.msg}, order: {self.order})'
     
 class Data():
     def __init__(self, level) -> None:
@@ -109,6 +129,7 @@ class LimitOrderBook:
         self.smart_agent_id = smart_agent_id
         self.market_agent_id = noise_agent_id
         self.strategic_agent_id = strategic_agent_id
+        self.registered_agents = [smart_agent_id, noise_agent_id, strategic_agent_id]
         # order ids by agent 
         self.price_map = {'bid': SortedDict(neg), 'ask': SortedDict()}
         self.order_map = {}
@@ -120,6 +141,7 @@ class LimitOrderBook:
         # self._logging()
     
     def _logging(self, order=None):
+        # ToDo: increase efficiency of logging
         self.data.orders.append(order)
         # level 2 data including empty levels
         bid_prices, bid_volumes = self.level2('bid')
@@ -139,7 +161,7 @@ class LimitOrderBook:
         self.data.best_ask_volumes.append(best_ask_volume)
     
 
-    def process_order(self, order):
+    def process_order(self, order, log_order=True):
         """
         - an order is a dictionary with fields agent_id, type, side, price, volume, order_id
         - some of those fields are optional depending on the order type 
@@ -156,12 +178,17 @@ class LimitOrderBook:
             msg = self.cancellation(order)
         elif order.type == 'modification':
             msg = self.modification(order)
+        elif order.type == 'cancellation_by_price_volume':
+            msg = self.cancellation_by_price_volume(order)
         else:
             raise ValueError("order type not supported")
 
         self.update_n += 1 
-        # log shape of the book after transition         
-        self._logging(order)
+        # log shape of the book after transition 
+        if log_order:        
+            self._logging(order)
+        else:
+            pass
         return msg
 
 
@@ -282,6 +309,45 @@ class LimitOrderBook:
         if not self.price_map[side][price]:
             self.price_map[side].pop(price)
         return CancellationMessage(order=order, msg=f'order with id {id} cancelled')
+    
+    def cancellation_by_price_volume(self, order):
+        assert order.agent_id in self.registered_agents, "agent id not registered"
+        assert order.side in ['bid', 'ask'], "side must be either bid or ask"
+        assert order.price in self.price_map[order.side], "price not in price map"
+        assert order.volume >= 0, "volume must be positive"
+
+        volume = order.volume
+        filled_orders = {self.smart_agent_id:[], self.market_agent_id:[], self.strategic_agent_id:[]}
+
+        for cp_order_id in self.price_map[order.side][order.price][::-1]:
+            if volume == 0:
+                break
+            cp_order = self.order_map[cp_order_id]
+            if cp_order.agent_id == order.agent_id:
+                if volume < 0:
+                    raise ValueError("cancellation volume is negative")
+                elif volume < cp_order.volume:
+                    # counterparty order is partially filled
+                    cp_order.volume -= volume
+                    fill_msg = {'partial_fill': True, 'filled_volume': volume, 'order': cp_order, 'fill_price': order.price}
+                    filled_orders[cp_order.agent_id].append(fill_msg)
+                    volume = 0.0
+                    break
+                elif volume >= cp_order.volume:
+                    fill_msg = {'partial_fill': False, 'filled_volume': cp_order.volume, 'order': cp_order, 'fill_price': order.price}
+                    filled_orders[cp_order.agent_id].append(fill_msg)
+                    self.price_map[order.side][order.price].remove(cp_order_id)              
+                    self.order_map.pop(cp_order_id)
+                    self.order_map_by_agent[cp_order.agent_id].remove(cp_order.order_id)       
+                    volume = volume - cp_order.volume
+            else:
+                pass 
+        
+        return CancellationByPriceVolumeMessage(order=order, msg=f'worst {order.volume} orders at {order.price} cancelled', filled_orders=filled_orders, filled_volume=order.volume-volume)
+
+
+
+
 
     def modification(self, order):
         assert order.volume <= self.order_map[order.order_id].volume, "new volume larger than original order volume"
