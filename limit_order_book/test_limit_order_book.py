@@ -1,15 +1,55 @@
-from limit_order_book import LimitOrderBook, LimitOrder, MarketOrder, Cancellation, Modification
+from limit_order_book import LimitOrderBook, LimitOrder, MarketOrder, Cancellation, Modification, CancellationByPriceVolume
 import unittest
 import numpy as np
 
 class TestOrderBook(unittest.TestCase):
 
+    def test_cancellation_by_volume(self):
+        LOB = LimitOrderBook(smart_agent_id='smart_agent', noise_agent_id='noise_agent')
+        orders = []
+        orders.append(LimitOrder('noise_agent', 'bid', 99, 10))
+        orders.append(LimitOrder('noise_agent', 'bid', 100, 5))
+        orders.append(LimitOrder('noise_agent', 'ask', 101, 5))
+        orders.append(LimitOrder('noise_agent', 'ask', 102, 5))
+        orders.append(LimitOrder('smart_agent', 'ask', 102, 2))
+        orders.append(LimitOrder('noise_agent', 'ask', 102, 2))
+        [LOB.process_order(order) for order in orders]
+        order = CancellationByPriceVolume(agent_id='noise_agent', price=102, volume=4, side='ask')
+        LOB.process_order(order)
+        assert LOB.data.ask_volumes[-1][1] == 5 
+        assert LOB.order_map[LOB.price_map['ask'][102][-1]].agent_id == 'smart_agent'
+
+        order = CancellationByPriceVolume(agent_id='noise_agent', price=102, volume=6, side='ask')
+        LOB.process_order(order)
+        assert LOB.data.ask_volumes[-1][1] == 2
+        assert LOB.order_map[LOB.price_map['ask'][102][-1]].agent_id == 'smart_agent'
+
+
+        orders = []
+        orders.append(LimitOrder('smart_agent', 'bid', 99, 3))
+        orders.append(LimitOrder('smart_agent', 'bid', 99, 1))
+        orders.append(LimitOrder('noise_agent', 'bid', 99, 2))
+        orders.append(CancellationByPriceVolume(agent_id='noise_agent', price=99, volume=6, side='bid'))
+        [LOB.process_order(order) for order in orders]
+
+        assert LOB.data.bid_volumes[-1][1] == 10+6-6
+        assert LOB.order_map[LOB.price_map['bid'][99][-1]].agent_id == 'smart_agent'
+
+        order = CancellationByPriceVolume(agent_id='noise_agent', price=99, volume=20, side='bid')
+        LOB.process_order(order)
+
+        assert LOB.data.bid_volumes[-1][1] == 3+1 
+
+        assert LOB.order_map[LOB.price_map['bid'][99][-1]].agent_id == 'smart_agent'
+
+
+        return None
+
+
+
     def test_logging(self):
         LOB = LimitOrderBook(smart_agent_id='smart_agent', noise_agent_id='noise_agent', level=3)
         orders = []
-        # the log of the limit order book shape is delayed by one step 
-        # [o0, o1, o2] 
-        # [s0=nan, s1, s2], s1 is the effect of o0        
         orders.append(LimitOrder('noise_agent', 'bid', 99, 10)) #1
         orders.append(LimitOrder('noise_agent', 'bid', 100, 5)) #2
         orders.append(LimitOrder('noise_agent', 'ask', 101, 5)) #3
@@ -228,6 +268,8 @@ class TestOrderBook(unittest.TestCase):
 
 if __name__ == '__main__':
     TLOB = TestOrderBook()
+    print("##########")
+    TLOB.test_cancellation_by_volume()
     print('##########')
     TLOB.test_logging()
     print('##########')
@@ -242,9 +284,3 @@ if __name__ == '__main__':
     TLOB.test_modification()
     print('##########')
     TLOB.test_queue_position()
-
-
-
-
-
-

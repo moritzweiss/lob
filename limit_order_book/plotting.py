@@ -14,13 +14,14 @@ import pandas as pd
 # TODO: Wrap all the data into one data frame 
 
 
-def heat_map(trades, max_level=30, level2=None):
+def heat_map(trades, level2, max_level=30, scale=1000, max_volume=1000):
     '''
-    - bid/ask_prices: list of integer values np arrays. each array contains [p1, p2, p3, ...] 
-    - bid/ask_volumes: list of integer values np arrays. each array contains [v1, v2, v3, ...]
-    - best_bid/ask_prices: list of integer values
-    - trades: list of market trades: None or ('bid', size) or ('ask', size), None means that there was no trade
-    - out: heatmap of the book 
+    inputs:
+        - trades: data frame with columns ['type', 'side', 'size', 'price']
+        - level2: data frame with columns ['best_bid_price', 'best_ask_price', 'best_bid_volume', 'best_ask_volume', 'bid_price_0', 'bid_volume_0', 'ask_price_0', 'ask_volume_0', ...]
+
+    output:
+        - out: heatmap of the book 
     '''
 
     bid_prices = [f'bid_price_{n}' for n in range(max_level)] 
@@ -47,32 +48,41 @@ def heat_map(trades, max_level=30, level2=None):
     trades = trades.shift(-1)
     bid_mask = (trades.side == 'bid') & (trades.type == 'M')
     ask_mask = (trades.side == 'ask') & (trades.type == 'M')     
-    max_volume = max(trades['size'][trades.type == 'M'])
+    # max_volume = max(trades['size'][trades.type == 'M'])
+    # hard coded. find better logic for this. 
+    # max_volume = 1000
 
     plt.figure()
 
-    plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-10, vmax=10)
+    plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-max_volume, vmax=max_volume)
 
     plt.plot(time, level2.best_bid_price, '-', color='black', linewidth=3)
     plt.plot(time, level2.best_ask_price, '-', color='black', linewidth=3)
     plt.colorbar()
 
-    plt.scatter(time[ask_mask], level2.best_ask_price[ask_mask], color='black', marker='^', s=50*trades['size'][ask_mask]/max_volume) 
-    plt.scatter(time[bid_mask], level2.best_bid_price[bid_mask], color='black', marker='v', s=50*trades['size'][bid_mask]/max_volume)
+    M = max(trades['size'])
+    plt.scatter(time[ask_mask], level2.best_ask_price[ask_mask], color='black', marker='^', s= (scale/M)*trades['size'][ask_mask]) 
+    plt.scatter(time[bid_mask], level2.best_bid_price[bid_mask], color='black', marker='v', s= (scale/M)*trades['size'][bid_mask])
 
 
     return None  
 
-def plot_average_book_shape(bid_volumes, ask_volumes, level=3):
+def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
     """
     - bid/ask_volumes: list of np arrays, [v1, v2, v3, ...]
     """ 
     level = len(bid_volumes[0]) 
     book_shape_bid = np.nanmean(bid_volumes, axis=0)
     book_shape_ask = np.nanmean(ask_volumes, axis=0)    
-    plt.figure()
-    plt.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
-    plt.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
+    if symetric:
+        plt.figure()        
+        shape = (book_shape_bid + book_shape_ask)/2
+        plt.bar(range(0,-level,-1), shape, color='blue', label='bid')
+        plt.bar(range(1,level+1,1), shape, color='red', label='ask')    
+    else:
+        plt.figure()        
+        plt.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
+        plt.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
     plt.legend(loc='upper right')
     plt.xlabel('relative distance to mid price')
     plt.ylabel('average volume')
@@ -87,6 +97,8 @@ def plot_prices(level2, trades, marker_size=50):
         - microprice 
         - trades on bid and ask (larger trade with larger marker size)            
     """
+
+    level2 = level2.copy()
 
     level2['micro_price'] = (level2.best_bid_price * level2.best_ask_volume + level2.best_ask_price * level2.best_bid_volume) / (level2.best_bid_volume + level2.best_ask_volume)
 
@@ -115,8 +127,12 @@ def plot_prices(level2, trades, marker_size=50):
 
 def plot_level2_order_book(bid_prices, ask_prices, bid_volumes, ask_volumes, n):
     """"
-    - bid/ask_prices: list of np arrays, [p1, p2, p3, ...]
-    - bid/ask_volumes: list of np arrays, [v1, v2, v3, ...]
+    input: 
+        - bid/ask_prices: list of np arrays, [p1, p2, p3, ...]
+        - bid/ask_volumes: list of np arrays, [v1, v2, v3, ...]
+        - n: index of the order book snapshot
+    output:
+        - plot of the order book snapshot
     """
     plt.figure()
     plt.bar(bid_prices[n], bid_volumes[n], color='b')
