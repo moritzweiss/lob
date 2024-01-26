@@ -428,8 +428,8 @@ class LimitOrderBook:
         raise ValueError('order_id not found on this price level')
     
     def log_to_df(self):
-        time = np.arange(0, self.update_n)
-        data = pd.DataFrame({'best_bid_price': self.data.best_bid_prices, 'best_ask_price': self.data.best_ask_prices, 'best_bid_volume': self.data.best_bid_volumes, 'best_ask_volume': self.data.best_ask_volumes})
+        time = np.arange(0, self.update_n)        
+        data = {'best_bid_price': self.data.best_bid_prices, 'best_ask_price': self.data.best_ask_prices, 'best_bid_volume': self.data.best_bid_volumes, 'best_ask_volume': self.data.best_ask_volumes}
         # data = pd.DataFrame({'best_bid_volume': self.data.best_bid_volumes, 'best_ask_volume': self.data.best_ask_volumes})
         bid_prices = np.vstack(self.data.bid_prices)
         ask_prices = np.vstack(self.data.ask_prices)
@@ -440,6 +440,7 @@ class LimitOrderBook:
             data[f'bid_volume_{i}'] = bid_volumes[:,i]
             data[f'ask_price_{i}'] = ask_prices[:,i]
             data[f'ask_volume_{i}'] = ask_volumes[:,i]
+        data = pd.DataFrame.from_dict(data)
         orders = {}
         order_type = ['M' if x.type == 'market' else 'L' if x.type == 'limit' else 'C' if x.type == 'cancellation' else np.nan for x in self.data.orders]
         order_side = [x.side if x.type == 'limit' or x.type == 'market' else np.nan for x in self.data.orders]
