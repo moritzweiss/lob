@@ -6,7 +6,7 @@ import pandas as pd
 pd.set_option('display.max_rows', 100)
 
 level = 30
-T = 3e3
+T = 1e3
 
 start = time.time()
 

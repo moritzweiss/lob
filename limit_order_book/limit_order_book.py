@@ -21,7 +21,7 @@ class LimitOrder(Order):
         self.order_id = None
         self.type = 'limit'
     def __repr__(self):
-        return f'LO(side: {self.side}, price: {self.price}, volume: {self.volume}, order_id: {self.order_id})'
+        return f'LO(agent: {self.agent_id}, side: {self.side}, price: {self.price}, volume: {self.volume}, order_id: {self.order_id})'
 
 class MarketOrder(Order):
     def __init__(self, agent_id, side, volume):
@@ -123,17 +123,14 @@ class Data():
     
 
 class LimitOrderBook:
-    def __init__(self, smart_agent_id, noise_agent_id, strategic_agent_id=None, level=10):
-        # how many levels of the order book are stored? 
+    def __init__(self, list_of_agents = [], level=10):
+        # how many levels of the order book are stored. level=10 means that the first 10 levels of the order book are logged? 
         self.level = level
-        self.smart_agent_id = smart_agent_id
-        self.market_agent_id = noise_agent_id
-        self.strategic_agent_id = strategic_agent_id
-        self.registered_agents = [smart_agent_id, noise_agent_id, strategic_agent_id]
+        self.registered_agents = list_of_agents
         # order ids by agent 
         self.price_map = {'bid': SortedDict(neg), 'ask': SortedDict()}
         self.order_map = {}
-        self.order_map_by_agent = {smart_agent_id: set(), noise_agent_id: set(), strategic_agent_id: set()}
+        self.order_map_by_agent = {agent_id: set() for agent_id in list_of_agents}
         self.update_n = 0
         # order matters here !!!, first data, then logging 
         self.data = Data(level=level)
@@ -167,8 +164,8 @@ class LimitOrderBook:
         - some of those fields are optional depending on the order type 
         """
 
-        # agent_id should be one of the three agents
-        assert order.agent_id in [self.market_agent_id, self.smart_agent_id, self.strategic_agent_id]            
+        # agent_id should be one of the registered agents 
+        assert order.agent_id in self.registered_agents, "agent id not registered"
 
         if order.type == 'limit':
             msg = self.handle_limit_order(order)
@@ -246,8 +243,9 @@ class LimitOrderBook:
             raise ValueError(f"{side} side is empty!")
 
         execution_price = 0.0
-        
-        filled_orders = {self.smart_agent_id:[], self.market_agent_id:[], self.strategic_agent_id:[]}
+
+        # list of fill messages for each agent         
+        filled_orders = {agent_id: [] for agent_id in self.registered_agents}
 
         prices = list(self.price_map[side].keys())
         for price in prices: 
@@ -273,7 +271,7 @@ class LimitOrderBook:
                     filled_orders[cp_agent_id].append(fill_msg)
                     self.price_map[side][price].remove(cp_order_id)              
                     self.order_map.pop(cp_order_id)
-                    self.order_map_by_agent[cp_order.agent_id].remove(cp_order.order_id)       
+                    self.order_map_by_agent[cp_order.agent_id].remove(cp_order.order_id)   # remove is for sets 
                     execution_price += price * cp_order.volume
                     market_volume = market_volume - cp_order.volume
                 else:
@@ -295,6 +293,7 @@ class LimitOrderBook:
 
 
     def cancellation(self, order):
+        assert order.agent_id in self.order_map_by_agent, "order id not in order map by agent"
         assert order.order_id in self.order_map, "order id not in order map"
         assert order.agent_id == self.order_map[order.order_id].agent_id, "agent id does not match order id"
         # select id, side, price 
@@ -317,7 +316,7 @@ class LimitOrderBook:
         assert order.volume >= 0, "volume must be positive"
 
         volume = order.volume
-        filled_orders = {self.smart_agent_id:[], self.market_agent_id:[], self.strategic_agent_id:[]}
+        filled_orders = {agent_id: [] for agent_id in self.registered_agents}
 
         for cp_order_id in self.price_map[order.side][order.price][::-1]:
             if volume == 0:
@@ -328,8 +327,8 @@ class LimitOrderBook:
                     raise ValueError("cancellation volume is negative")
                 elif volume < cp_order.volume:
                     # counterparty order is partially filled
-                    cp_order.volume -= volume
                     fill_msg = {'partial_fill': True, 'filled_volume': volume, 'order': cp_order, 'fill_price': order.price}
+                    cp_order.volume -= volume
                     filled_orders[cp_order.agent_id].append(fill_msg)
                     volume = 0.0
                     break
@@ -344,9 +343,6 @@ class LimitOrderBook:
                 pass 
         
         return CancellationByPriceVolumeMessage(order=order, msg=f'worst {order.volume} orders at {order.price} cancelled', filled_orders=filled_orders, filled_volume=order.volume-volume)
-
-
-
 
 
     def modification(self, order):
@@ -442,10 +438,10 @@ class LimitOrderBook:
             data[f'ask_volume_{i}'] = ask_volumes[:,i]
         data = pd.DataFrame.from_dict(data)
         orders = {}
-        order_type = ['M' if x.type == 'market' else 'L' if x.type == 'limit' else 'C' if x.type == 'cancellation' else np.nan for x in self.data.orders]
-        order_side = [x.side if x.type == 'limit' or x.type == 'market' else np.nan for x in self.data.orders]
-        order_size = [x.volume if x.type == 'limit' or x.type == 'market' else np.nan for x in self.data.orders]
-        order_price = [x.price if x.type == 'limit' else np.nan for x in self.data.orders]
+        order_type = ['M' if x.type == 'market' else 'L' if x.type == 'limit' else 'C' if x.type == 'cancellation' else 'PC' if x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
+        order_side = [x.side if x.type == 'limit' or x.type == 'market' or x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
+        order_size = [x.volume if x.type == 'limit' or x.type == 'market' or x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
+        order_price = [x.price if x.type == 'limit' or x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]        
         orders['type'] = order_type
         orders['side'] = order_side
         orders['size'] = order_size
