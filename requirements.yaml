@@ -1,0 +1,11 @@
+name: nlob
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - matplotlib
+  - gymnasium
+  - sortedcontainers
+  - pandas
+prefix: /Users/weim/anaconda3/envs/nlob
