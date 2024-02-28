@@ -8,4 +8,5 @@ dependencies:
   - gymnasium
   - sortedcontainers
   - pandas
-prefix: /Users/weim/anaconda3/envs/nlob
+  - numpy
+
