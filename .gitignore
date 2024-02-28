@@ -1,0 +1,6 @@
+__pycache__/
+__pycache__
+__pycache__/*
+limit_order_book/__pycache__/limit_order_book.cpython-39.pyc
+simulation/__pycache__/average_shape_vectorized.cpython-39.pyc
+config/__pycache__/average_shape_vectorized.cpython-39.pyc
