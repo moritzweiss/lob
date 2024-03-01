@@ -7,3 +7,5 @@ config/__pycache__/average_shape_vectorized.cpython-39.pyc
 data/
 results/
 .vscode/
+plots/
+tables/
