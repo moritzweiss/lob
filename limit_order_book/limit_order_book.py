@@ -4,6 +4,14 @@ from sortedcontainers import SortedDict, SortedList
 import numpy as np
 import pandas as pd
 
+class MessageDict:
+    def __init__(self):
+        self.messages = {}
+    def add(self, agent_id, message):
+        if agent_id in self.messages:
+            self.messages[agent_id].append(message)
+        else:
+            self.messages[agent_id] = [message]
 
 class Order:
     def __init__(self, agent_id, type):
@@ -282,7 +290,7 @@ class LimitOrderBook:
             if market_volume == 0.0:
                 break
 
-        if market_volume > 0.0:
+        if market_volume > 0.0: 
             print(f"market order of size {order.volume} not fully executed, {market_volume} remaining!")            
         
         # filled_volume = order.volume - market_volume
