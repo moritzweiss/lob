@@ -32,7 +32,7 @@ class NoiseAgent():
         self.damping_factor = damping_factor
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
         
-        self.imbalance_n_levels = imbalance_n_levels # don't really need this at the moment 
+        self.imbalance_n_levels = imbalance_n_levels # anything related to this is commented out at the moment  
 
         self.config = config[config_n]
 

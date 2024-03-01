@@ -12,15 +12,15 @@ from limit_order_book.plotting import heat_map
 
 
 class Market(gym.Env):
-    def __init__(self, seed, n_steps=int(1e3), level=30, volume=10, side='ask') -> None:
+    def __init__(self, seed, n_steps=int(1e3), level=30) -> None:
         super().reset(seed=seed)
         self.level = level
         self.n_steps = n_steps
-        self.noise_agent = NoiseAgent(level=level, rng=self.np_random)
+        self.noise_agent = NoiseAgent(level=level, rng=self.np_random, config_n=1, initial_shape_file='data_small_queue.npz', imbalance_reaction=False)
         return None 
     
     def reset(self):
-        self.lob = LimitOrderBook(level=self.level, smart_agent_id='smart_agent', noise_agent_id='noise_agent')
+        self.lob = LimitOrderBook(level=self.level, list_of_agents=['smart_agent','noise_agent'])
         self.time = 0
         orders = self.noise_agent.initialize()
         [self.lob.process_order(order) for order in orders]
@@ -36,11 +36,10 @@ class Market(gym.Env):
         return terminated
 
 
-side = 'ask'
-n_samples = int(1e3)
-max_steps = int(2e3)
+n_samples = int(5e2)
+max_steps = int(1e3)
 volume = 100 
-M = Market(seed=1, side=side, volume=volume, n_steps=max_steps)
+M = Market(seed=1, n_steps=max_steps)
 
 
 mid_prices = []
@@ -65,7 +64,7 @@ for n_samples in range(n_samples):
 # heat_map(trades=trades, level2=df, max_volume=100, scale=200, max_level=5)
 # plt.show()
 
-print(f'average trade volume is {np.mean(m)}')
+print(f'average trade volume is {np.mean(market_order_volumes)}')
 print(f'average mid price is {np.mean(mid_prices)}')
 print(f'average spread is {np.mean(spreads)}')
 

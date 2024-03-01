@@ -29,15 +29,23 @@ class Market(gym.Env):
         self.n_steps = n_steps
         self.volume = volume 
         self.side = side
-        self.place_at = place_at
+        self.place_at = place_at        
         # self.n_samples = n_samples
         return None 
     
     def reset(self):
-        self.lob = LimitOrderBook(level=self.level, list_of_agents=['noise_agent', 'smart_agent'])
+        self.lob = LimitOrderBook(level=self.level, list_of_agents=['noise_agent', 'smart_agent', 'strategic_agent'])
         self.time = 0
+        # initialize the book 
         orders = self.noise_agent.initialize()
         [self.lob.process_order(order) for order in orders]
+        # placement by strategic investor  
+        order = LimitOrder('strategic_agent', 'ask', self.lob.get_best_price('ask'), 50)
+        # 100 noise transitions 
+        for _ in range(100):
+            order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
+            self.lob.process_order(order)
+            self.time += 1
         if self.side == 'ask':
             price = self.lob.get_best_price('ask')
             order = LimitOrder('smart_agent', 'ask', price+self.place_at, self.volume)
@@ -45,11 +53,14 @@ class Market(gym.Env):
             price = self.lob.get_best_price('bid')
             order = LimitOrder('smart_agent', 'bid', price, self.volume)
         self.lob.process_order(order) 
-        self.time = 0 
+        # self.time = 0 
         return None
     
     def step(self):
         terminated = False
+        if self.time%100 == 0:
+            order = LimitOrder('strategic_agent', 'ask', self.lob.get_best_price('ask'), 50)                        
+            self.lob.process_order(order)
         order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         # print(order.type)
         out = self.lob.process_order(order)
@@ -101,19 +112,23 @@ class SampleMarket:
  
 if __name__ == '__main__':
 
-    n_workers = 10
+    n_workers = 1
     n_samples = int(1e2)
     max_steps = int(1e3)
     # volumes = [1, 2]
-    volumes = [10, 20, 40]
+    volumes = [20]
     # volumes = [1]
     # volumes = [1]
     # placed_at = [0,1,2,3]
     # placed_at = [0,1,2,3]
     placed_at = [0]
     reaction = [False, True]
-    reaction = [True]
+    # reaction = [True]
     # reaction = [False]
+
+
+    # SM = SampleMarket(n_steps=max_steps, imbalance_reaction=True, n_samples=n_samples, level=30, volume=10, side='ask', place_at=0)
+    # fill_times = SM.sample(1)
 
 
     data = {}
@@ -170,15 +185,15 @@ if __name__ == '__main__':
 
                 # print(f'{(time.time()-start)/60} minutes to sample')
         
-    print(data)
+    # print(data)
     data = pd.DataFrame.from_dict(data)
     data.index = volumes
     # data.index = placed_at
     data.index.name = 'lots'
     # data.index.name = 'level' 
     data = data.round(2)
-
-    data.to_latex(f'tables/fill_time_distribution.tex', index=True, float_format="%.2f")
+    print(data)
+    # data.to_latex(f'tables/fill_time_distribution.tex', index=True, float_format="%.2f")
     # only vary the levels not volume
     # data.to_latex(f'tables/fill_time_distribution_per_level.tex', index=True, float_format="%.2f")
 
