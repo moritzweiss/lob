@@ -4,7 +4,7 @@ from sortedcontainers import SortedDict, SortedList
 import numpy as np
 import pandas as pd
 
-class MessageDict:
+class DynamicDict:
     def __init__(self):
         self.messages = {}
     def add(self, agent_id, message):
@@ -61,55 +61,110 @@ class Cancellation(Order):
         self.order_id = order_id
         self.agent_id = agent_id
         self.type = 'cancellation'
+        # self.side = side
+        # self.price = price
+        # self.volume = volume
     def __repr__(self):
-        return f'C(order_id: {self.order_id})'
+        return f'Cancellation(agent_id={self.agent_id}, order_id={self.order_id})'
 
 class Modification(Order):
-    def __init__(self, agent_id, order_id, volume):
+    def __init__(self, agent_id, order_id, new_volume):
         super().__init__(agent_id, 'modification')
         assert order_id >= 0, "order id must be positive"
-        assert volume > 0, "volume must be positive"
+        assert new_volume > 0, "volume must be positive"
         self.order_id = order_id
-        self.volume = volume
+        self.volume = new_volume
         self.type = 'modification'
     def __repr__(self):
-        return f'M(order_id: {self.order_id}, volume: {self.volume})'
+        return f'Modification(agent_id={self.agent_id}, order_id={self.order_id}, volume={self.new_volume})'
+
+
+class ModificationConfirmation():
+    def __init__(self, agent_id, order_id, new_volume, old_volume):
+        self.agent_id = agent_id
+        self.order_id = order_id
+        self.new_volume = new_volume
+        self.old_volume = old_volume
+    def __repr__(self) -> str:
+        return f'ModificationConf(agent_id={self.agent_id}, order_id={self.order_id}, new_volume={self.new_volume}, old_volume={self.old_volume})'
+
+        
 
 class FillMessage:
     def __init__(self, order, msg):
         self.order = order
         self.msg = msg
 
-class FillMessageLimitOrder(FillMessage):
-    def __init__(self, order, msg, order_id):
-        super().__init__(order, msg)
+# class LimitOrderFill(FillMessage):
+#     def __init__(self, order, msg, order_id):
+#         super().__init__(order, msg)
+#         self.order_id = order_id
+#     def __repr__(self) -> str:
+#         return f'FLO(msg: {self.msg}, order: {self.order}, order_id: {self.order_id})'
+    
+class LimitOrderFill():
+    def __init__(self, order_id, price, volume, side, agent_id):
         self.order_id = order_id
+        self.price = price
+        self.volume = volume
+        self.side = side
+        self.agent_id = agent_id
     def __repr__(self) -> str:
-        return f'FLO(msg: {self.msg}, order: {self.order}, order_id: {self.order_id})'
+        return f'FillLO(order_id={self.order_id}, price={self.price}, volume={self.volume}, side={self.side}, agent_id={self.agent_id})'
+    
 
-
-class FillMessageMarketOrder(FillMessage):
-    def __init__(self, order, msg, filled_orders, execution_price):
-        super().__init__(order, msg)
-        self.filled_orders = filled_orders
-        self.execution_price = execution_price
-    def __repr__(self) -> str:
-        return f'FMO(msg: {self.msg}, order: {self.order}, execution_price: {self.execution_price})'
-
-
-class CancellationMessage(FillMessage):
-    def __init__(self, order, msg):
-        super().__init__(order, msg)
-    def __repr__(self) -> str:
-        return f'C(msg: {self.msg}, order: {self.order})'
-
-class CancellationByPriceVolumeMessage(FillMessage):
-    def __init__(self, order, msg, filled_orders, filled_volume):
-        super().__init__(order, msg)
-        self.filled_orders = filled_orders
+class PassiveFill():
+    def __init__(self, order_id, filled_volume, fill_price, side, partial_fill, agent_id):
+        self.order_id = order_id
         self.filled_volume = filled_volume
+        self.fill_price = fill_price
+        self.side = side
+        self.partial_fill = partial_fill
+        self.agent_id = agent_id
+        self.message_type = 'passive_fill'
     def __repr__(self) -> str:
-        return f'CBPV(msg: {self.msg}, order: {self.order})'
+        if self.partial_fill:
+            return f'PassiveFill(filled volume={self.filled_volume}, price={self.fill_price}, id={self.order_id}, side={self.side}, partial_fill)'
+        else:
+            return f'PassiveFill(filled volume={self.filled_volume}, price={self.fill_price}, id={self.order_id}, side={self.side}, full_fill)'
+        
+
+class MarketOrderFill():
+    def __init__(self, agent_id, filled_volume, execution_price, side, partial_fill, passive_fills):
+        self.filled_volume = filled_volume
+        self.execution_price = execution_price
+        self.side = side 
+        self.partial_fill = partial_fill
+        self.message_type = 'market_fill'
+        self.passive_fills = passive_fills
+        self.agent_id = agent_id
+    def __repr__(self) -> str:
+        return f'FillMO(filled_volume={self.filled_volume}, execution_price={self.execution_price}, side={self.side})'
+
+
+class CancellationMessage():
+    def __init__(self, agent_id, order_id, price, side, volume):
+        self.agent_id = agent_id
+        self.order_id = order_id
+        self.price = price
+        self.side = side
+        self.volume = volume
+    def __repr__(self) -> str:
+        return f'CancellationConf(order_id={self.order_id}, agent_id={self.agent_id}, side={self.side}, price={self.price}, volume={self.volume})'
+
+class CancellationByPriceVolumeMessage():
+    def __init__(self, affected_orders, filled_volume, partial_fill, price, agent_id):
+        # super().__init__(order, msg)
+        self.affected_orders = affected_orders
+        self.filled_volume = filled_volume
+        self.partial_fill = partial_fill        
+        self.price = price
+        self.agent_id = agent_id
+    def __repr__(self) -> str:
+        if self.partial_fill:
+            return f'CancellationPV(filled_volume={self.filled_volume}, price={self.price}, partial_fill)'
+        else:
+            return f'CancellationPV(filled_volume={self.filled_volume}, price={self.price}, full_fill)'
     
 class Data():
     def __init__(self, level) -> None:
@@ -234,7 +289,7 @@ class LimitOrderBook:
         self.order_map[order.order_id] = order
         self.order_map_by_agent[order.agent_id].add(order.order_id)
 
-        return FillMessageLimitOrder(order=order, msg='limit order added to the book', order_id=order.order_id)
+        return LimitOrderFill(order_id=order.order_id, price=order.price, volume=order.volume, side=order.side, agent_id=order.agent_id)
 
 
     def handle_market_order(self, order):
@@ -251,9 +306,10 @@ class LimitOrderBook:
             raise ValueError(f"{side} side is empty!")
 
         execution_price = 0.0
+        filled_volume = 0.0 
 
         # list of fill messages for each agent         
-        filled_orders = {agent_id: [] for agent_id in self.registered_agents}
+        passive_fills = DynamicDict()
 
         prices = list(self.price_map[side].keys())
         for price in prices: 
@@ -266,20 +322,21 @@ class LimitOrderBook:
                     raise ValueError("market volume is negative")
                 elif market_volume < cp_order.volume:
                     # counterparty order is partially filled
-                    # add additional fields for information, these fields will also be carried in the order map                    
+                    msg = PassiveFill(order_id=cp_order_id, filled_volume=market_volume, fill_price=price, side=side, partial_fill=True, agent_id=cp_agent_id)
+                    passive_fills.add(cp_agent_id, msg)
                     cp_order.volume -= market_volume
-                    fill_msg = {'partial_fill': True, 'filled_volume': market_volume, 'order': cp_order, 'fill_price': price}
-                    filled_orders[cp_agent_id].append(fill_msg)
                     execution_price += price * market_volume
+                    filled_volume += market_volume
                     market_volume = 0.0
-                    # self.order_map[cp_order_id]['volume'] -= market_volume, this is not necessary, opposite order is a reference to opposite_order['volume']
                     break
                 elif market_volume >= cp_order.volume:
-                    fill_msg = {'partial_fill': False, 'filled_volume': cp_order.volume, 'order': cp_order, 'fill_price': price}
-                    filled_orders[cp_agent_id].append(fill_msg)
+                    # counterparty order is fully filled
+                    fill_msg = PassiveFill(order_id=cp_order_id, filled_volume=cp_order.volume, fill_price=price, side=side, partial_fill=False, agent_id=cp_agent_id)
+                    passive_fills.add(cp_agent_id, fill_msg)
                     self.price_map[side][price].remove(cp_order_id)              
                     self.order_map.pop(cp_order_id)
                     self.order_map_by_agent[cp_order.agent_id].remove(cp_order.order_id)   # remove is for sets 
+                    filled_volume += cp_order.volume
                     execution_price += price * cp_order.volume
                     market_volume = market_volume - cp_order.volume
                 else:
@@ -289,15 +346,17 @@ class LimitOrderBook:
                 self.price_map[side].pop(price)
             if market_volume == 0.0:
                 break
-
-        if market_volume > 0.0: 
-            print(f"market order of size {order.volume} not fully executed, {market_volume} remaining!")            
         
-        # filled_volume = order.volume - market_volume
-        # market: return type, filled orders, average price
-        # limit: return order_id
-        # cancellation: return ids of cancelled orders          
-        return FillMessageMarketOrder(order=order, msg='market order filled', filled_orders=filled_orders, execution_price=execution_price)
+        # basic checks 
+        if market_volume > 0.0: 
+            print('market volume not fully executed')
+        if market_volume < 0:
+            raise ValueError("filled volume cannot be negative")
+        
+        # create fill message for the market order
+        msg = MarketOrderFill(execution_price=execution_price, filled_volume=filled_volume, side=side, partial_fill=market_volume>0, passive_fills=passive_fills.messages, agent_id=order.agent_id)
+
+        return msg
 
 
     def cancellation(self, order):
@@ -306,8 +365,10 @@ class LimitOrderBook:
         assert order.agent_id == self.order_map[order.order_id].agent_id, "agent id does not match order id"
         # select id, side, price 
         id = order.order_id
-        side = self.order_map[order.order_id].side
+        # for info 
         price = self.order_map[order.order_id].price
+        volume = self.order_map[order.order_id].volume
+        side = self.order_map[order.order_id].side
         # remove 
         self.price_map[side][price].remove(id)
         self.order_map.pop(id)
@@ -315,7 +376,7 @@ class LimitOrderBook:
         # delete price level if empty
         if not self.price_map[side][price]:
             self.price_map[side].pop(price)
-        return CancellationMessage(order=order, msg=f'order with id {id} cancelled')
+        return CancellationMessage(order_id=order.order_id, agent_id=order.agent_id, price=price, side=side, volume=volume)
     
     def cancellation_by_price_volume(self, order):
         assert order.agent_id in self.registered_agents, "agent id not registered"
@@ -324,8 +385,10 @@ class LimitOrderBook:
         assert order.volume >= 0, "volume must be positive"
 
         volume = order.volume
-        filled_orders = {agent_id: [] for agent_id in self.registered_agents}
+        affected_orders = []
+        order_list = []
 
+        # go through the order ids in reverse order
         for cp_order_id in self.price_map[order.side][order.price][::-1]:
             if volume == 0:
                 break
@@ -334,31 +397,40 @@ class LimitOrderBook:
                 if volume < 0:
                     raise ValueError("cancellation volume is negative")
                 elif volume < cp_order.volume:
-                    # counterparty order is partially filled
+                    # modification 
                     fill_msg = {'partial_fill': True, 'filled_volume': volume, 'order': cp_order, 'fill_price': order.price}
-                    cp_order.volume -= volume
-                    filled_orders[cp_order.agent_id].append(fill_msg)
+                    order_list.append(Modification(agent_id=order.agent_id, order_id=cp_order_id, new_volume=cp_order.volume-volume)) 
+                    # msg = self.process_order(modification)
+                    # cp_order.volume -= volume
+                    # affected_orders.append(msg)
                     volume = 0.0
                     break
                 elif volume >= cp_order.volume:
-                    fill_msg = {'partial_fill': False, 'filled_volume': cp_order.volume, 'order': cp_order, 'fill_price': order.price}
-                    filled_orders[cp_order.agent_id].append(fill_msg)
-                    self.price_map[order.side][order.price].remove(cp_order_id)              
-                    self.order_map.pop(cp_order_id)
-                    self.order_map_by_agent[cp_order.agent_id].remove(cp_order.order_id)       
+                    # cancellation 
+                    cancellation = Cancellation(order.agent_id, cp_order_id)                    
+                    order_list.append(cancellation)
+                    # fill_msg = {'partial_fill': False, 'filled_volume': cp_order.volume, 'order': cp_order, 'fill_price': order.price}
+                    # msg = self.process_order(cancellation)
+                    # affected_orders.append(msg)
+                    # self.price_map[order.side][order.price].remove(cp_order_id)              
+                    # self.order_map.pop(cp_order_id)
+                    # self.order_map_by_agent[cp_order.agent_id].remove(cp_order.order_id)       
                     volume = volume - cp_order.volume
             else:
                 pass 
         
-        return CancellationByPriceVolumeMessage(order=order, msg=f'worst {order.volume} orders at {order.price} cancelled', filled_orders=filled_orders, filled_volume=order.volume-volume)
+        msg_list = [self.process_order(order) for order in order_list]
+
+        return CancellationByPriceVolumeMessage(affected_orders=msg_list, filled_volume=order.volume-volume, price=order.price, partial_fill=volume>0, agent_id=order.agent_id)
 
 
     def modification(self, order):
         assert order.volume <= self.order_map[order.order_id].volume, "new volume larger than original order volume"
-        assert 0 <= order.volume, "order volume is negative"
+        assert 0 <= order.volume, "volume must be positive"
         # update volume 
+        old_volume = self.order_map[order.order_id].volume
         self.order_map[order.order_id].volume = order.volume
-        return {'msg': f'order with id {id} modified', 'order': order, 'volume': order.volume}
+        return ModificationConfirmation(agent_id=order.agent_id, order_id=order.order_id, new_volume=order.volume, old_volume=old_volume)
     
     def get_best_price(self, side):
         if not self.price_map[side]:
