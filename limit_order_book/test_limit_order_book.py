@@ -16,8 +16,8 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'ask', 102, 2))
         [LOB.process_order(order) for order in orders]
         order = CancellationByPriceVolume(agent_id='noise_agent', price=102, volume=4, side='ask')
-        LOB.process_order(order)
-        assert LOB.data.ask_volumes[-1][1] == 5 
+        msg = LOB.process_order(order)
+        assert LOB.data.ask_volumes[-1][1] == 5 + 2 + 2 - 4 
         assert LOB.order_map[LOB.price_map['ask'][102][-1]].agent_id == 'smart_agent'
 
         order = CancellationByPriceVolume(agent_id='noise_agent', price=102, volume=6, side='ask')
@@ -86,7 +86,7 @@ class TestOrderBook(unittest.TestCase):
 
 
     def test_market_order_insertion(self):
-        LOB = LimitOrderBook(smart_agent_id='smart_agent', noise_agent_id='noise_agent')
+        LOB = LimitOrderBook(list_of_agents=['smart_agent', 'noise_agent'])
         orders = []
         orders.append(LimitOrder('noise_agent', 'bid', 99, 10))
         orders.append(LimitOrder('noise_agent', 'bid', 100, 5))
@@ -95,7 +95,7 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'ask', 102, 5))
         orders.append(MarketOrder('smart_agent', 'bid', 10))
         msg = [LOB.process_order(order) for order in orders]
-        [print(m.msg) for m in msg]
+        [print(m) for m in msg]
 
 
     def test_cancellation(self):
@@ -138,19 +138,20 @@ class TestOrderBook(unittest.TestCase):
             order_id = msg.order_id
             order = MarketOrder('noise_agent', 'ask', 8)
             msg = LOB.process_order(order)
-            assert msg.filled_orders['smart_agent'][0]['partial_fill'] == True
-            assert msg.filled_orders['smart_agent'][0]['filled_volume'] == 1 
+            assert msg.passive_fills['smart_agent'][0].partial_fill == True
+            assert msg.passive_fills['smart_agent'][0].filled_volume == 1 
             assert LOB.order_map[order_id].volume == 1
             assert order_id in LOB.order_map
             assert order_id in LOB.order_map_by_agent['smart_agent']
         else:
             msg = LimitOrder('smart_agent', 'ask', 104, 2)
             msg = LOB.process_order(msg)
+            assert msg.agent_id == 'smart_agent'
             order_id = msg.order_id
             order = MarketOrder('noise_agent', 'ask', 10)
             msg = LOB.process_order(order)
-            assert msg.filled_orders['smart_agent'][0]['partial_fill'] == False
-            assert msg.filled_orders['smart_agent'][0]['filled_volume'] == 2 
+            assert msg.passive_fills['smart_agent'][0].partial_fill == False
+            assert msg.passive_fills['smart_agent'][0].filled_volume == 2 
             assert order_id not in LOB.order_map
             assert order_id not in LOB.order_map_by_agent['smart_agent']
         return None 
@@ -169,11 +170,10 @@ class TestOrderBook(unittest.TestCase):
         while not filled:
             order = MarketOrder('noise_agent', 'ask', 2)
             msg = LOB.process_order(order)
-            if msg.filled_orders['smart_agent']:
+            if 'smart_agent' in msg.passive_fills:
                 filled = True
-                assert msg.filled_orders['smart_agent'][0]['filled_volume'] == 2
-                assert 103 not in LOB.price_map['ask']
-                assert t == 8 
+                assert msg.passive_fills['smart_agent'][0].filled_volume == 2
+                assert t == 5 + 3 
             t += 1
         LOB = LimitOrderBook(list_of_agents=['noise_agent', 'smart_agent'])
         orders = []
@@ -187,14 +187,35 @@ class TestOrderBook(unittest.TestCase):
         while not filled:
             order = MarketOrder('noise_agent', 'ask', 1)
             msg = LOB.process_order(order)
-            if msg.filled_orders['smart_agent']:
+            if 'smart_agent' in msg.passive_fills:
                 filled = True
-                assert msg.filled_orders['smart_agent'][0]['filled_volume'] == 1
+                assert msg.passive_fills['smart_agent'][0].filled_volume == 1
                 assert 104 not in LOB.price_map['ask']
                 assert 2 not in LOB.order_map
                 assert 2 not in LOB.order_map_by_agent['smart_agent']
                 assert t == 2
             t += 1
+        # LOB = LimitOrderBook(list_of_agents=['noise_agent', 'smart_agent'])
+        # orders = []
+        # orders.append(LimitOrder('noise_agent', 'ask', 101, 1))
+        # orders.append(LimitOrder('noise_agent', 'ask', 101, 2))
+        # orders.append(LimitOrder('noise_agent', 'ask', 102, 1))
+        # orders.append(LimitOrder('noise_agent', 'ask', 104, 3))
+        # orders.append(LimitOrder('smart_agent', 'ask', 104, 2))
+        # [LOB.process_order(order) for order in orders]
+        # orders = []
+        # filled = False
+        # t = 0 
+        # while not filled:
+        #     order = MarketOrder('noise_agent', 'ask', 1)
+        #     msg = LOB.process_order(order)
+        #     if 'smart_agent' in msg.passive_fills:
+        #         filled = True
+        #         assert msg.passive_fills['smart_agent'][0].filled_volume == 1
+        #         assert 104 not in LOB.price_map['ask']
+        #         assert 2 not in LOB.order_map
+        #         assert 2 not in LOB.order_map_by_agent['smart_agent']
+        #         assert t == 2
         return None
 
 
@@ -213,7 +234,7 @@ class TestOrderBook(unittest.TestCase):
         order = LOB.process_order(order)
         order_id = order.order_id
         order = Cancellation(order_id=order_id, agent_id='smart_agent')
-        order = LOB.process_order(order)
+        msg = LOB.process_order(order)
         assert order_id not in LOB.order_map
         assert order_id not in LOB.order_map_by_agent['smart_agent']
         return None 
@@ -232,7 +253,9 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'ask', 103, 3))
         [LOB.process_order(order) for order in orders]
         market_order = MarketOrder('smart_agent', 'bid', 5)
-        msg = LOB.process_order(market_order)        
+        msg = LOB.process_order(market_order)   
+        assert market_order.agent_id == 'smart_agent'
+        assert 'noise_agent' in msg.passive_fills
         assert msg.execution_price == 100*4+99*1
         assert 100 not in LOB.price_map['bid']
         assert len(LOB.price_map['bid'][99]) == 1
@@ -245,7 +268,7 @@ class TestOrderBook(unittest.TestCase):
         assert 102 not in LOB.price_map['ask']
         assert len(LOB.price_map['ask'][103]) == 1        
         assert LOB.order_map[LOB.price_map['ask'][103][0]].volume == 2
-        assert msg.filled_orders['noise_agent'][-1]['partial_fill'] == True
+        assert msg.passive_fills['noise_agent'][-1].partial_fill == True
         return None 
 
     def test_modification(self):
@@ -259,7 +282,7 @@ class TestOrderBook(unittest.TestCase):
         msgs = [LOB.process_order(order) for order in orders]
         order_id = msgs[-1].order_id
         assert LOB.order_map[order_id].volume == 4
-        order = Modification(order_id=order_id, agent_id='noise_agent', volume=1)
+        order = Modification(order_id=order_id, agent_id='noise_agent', new_volume=1)
         LOB.process_order(order)
         assert LOB.order_map[order_id].volume == 1
         return None
@@ -289,11 +312,14 @@ if __name__ == '__main__':
     print('##########')
     TLOB.test_fill_time()
     print('##########')
-    TLOB.test_limit_order_fill()
+    TLOB.test_limit_order_fill(partial_fill=True)
+    TLOB.test_limit_order_fill(partial_fill=False)
     print('##########')
     TLOB.test_cancellation()
     print('##########')
     TLOB.test_market_order()
+    print('##########')
+    TLOB.test_market_order_insertion()
     print('##########')
     TLOB.test_modification()
     print('##########')
