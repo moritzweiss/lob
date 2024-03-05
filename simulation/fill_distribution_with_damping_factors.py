@@ -102,18 +102,13 @@ if __name__ == '__main__':
     n_workers = 10
     n_samples = int(1e1)
     max_steps = int(1e3)
-    volume = 10
     placed_at = [0, 1, 2, 3]
     placed_at = [0]
-    # placed_at = [0, 1, 2, 3] 
-    reaction = False
     # damping_factors = [0.0, 0.5, 1.0, 2.0]
-    damping_factors = ['no_imbalance', 0.0, 0.1, 0.25, 0.5, 1.0]
+    # damping_factors = ['no_imbalance', 0.0, 0.1, 0.25, 0.5, 1.0]
     damping_factors = ['no_imbalance']
     
     for volume in [10,20,30,40]:
-        print('#######')
-        print('#######')
         print('#######')
         print(f'volume {volume}')
         data = {}   
