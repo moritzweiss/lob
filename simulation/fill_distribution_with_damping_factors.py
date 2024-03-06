@@ -55,8 +55,8 @@ class Market(gym.Env):
         order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         # print(order.type)
         out = self.lob.process_order(order)
-        if order.type == 'market':
-            if out.filled_orders['smart_agent']:
+        if out.type == 'market':
+            if 'smart_agent' in out.passive_fills:
                 if not self.lob.order_map_by_agent['smart_agent']:
                     terminated = True
                     return terminated
@@ -99,16 +99,17 @@ class SampleMarket:
 
 if __name__ == '__main__':
 
-    n_workers = 10
-    n_samples = int(1e1)
+    n_workers = 8
+    n_samples = int(1e2)
     max_steps = int(1e3)
     placed_at = [0, 1, 2, 3]
-    placed_at = [0]
+    placed_at = [0, 1]
     # damping_factors = [0.0, 0.5, 1.0, 2.0]
     # damping_factors = ['no_imbalance', 0.0, 0.1, 0.25, 0.5, 1.0]
-    damping_factors = ['no_imbalance']
+    damping_factors = ['no_imbalance', 0.0, 0.5]
+    volumes = [10, 40]
     
-    for volume in [10,20,30,40]:
+    for volume in volumes:
         print('#######')
         print(f'volume {volume}')
         data = {}   
