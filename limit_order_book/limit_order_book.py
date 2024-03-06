@@ -12,7 +12,7 @@ class DynamicDict:
             self.messages[agent_id].append(message)
         else:
             self.messages[agent_id] = [message]
-
+## orders 
 class Order:
     def __init__(self, agent_id, type):
         self.agent_id = agent_id
@@ -78,13 +78,14 @@ class Modification(Order):
     def __repr__(self):
         return f'Modification(agent_id={self.agent_id}, order_id={self.order_id}, volume={self.new_volume})'
 
-
+## confirmation messages
 class ModificationConfirmation():
     def __init__(self, agent_id, order_id, new_volume, old_volume):
         self.agent_id = agent_id
         self.order_id = order_id
         self.new_volume = new_volume
         self.old_volume = old_volume
+        self.type = 'modification'
     def __repr__(self) -> str:
         return f'ModificationConf(agent_id={self.agent_id}, order_id={self.order_id}, new_volume={self.new_volume}, old_volume={self.old_volume})'
 
@@ -109,6 +110,7 @@ class LimitOrderFill():
         self.volume = volume
         self.side = side
         self.agent_id = agent_id
+        self.type = 'limit'
     def __repr__(self) -> str:
         return f'FillLO(order_id={self.order_id}, price={self.price}, volume={self.volume}, side={self.side}, agent_id={self.agent_id})'
     
@@ -138,6 +140,7 @@ class MarketOrderFill():
         self.message_type = 'market_fill'
         self.passive_fills = passive_fills
         self.agent_id = agent_id
+        self.type = 'market'
     def __repr__(self) -> str:
         return f'FillMO(filled_volume={self.filled_volume}, execution_price={self.execution_price}, side={self.side})'
 
@@ -149,6 +152,7 @@ class CancellationMessage():
         self.price = price
         self.side = side
         self.volume = volume
+        self.type = 'cancellation'
     def __repr__(self) -> str:
         return f'CancellationConf(order_id={self.order_id}, agent_id={self.agent_id}, side={self.side}, price={self.price}, volume={self.volume})'
 
@@ -160,6 +164,7 @@ class CancellationByPriceVolumeMessage():
         self.partial_fill = partial_fill        
         self.price = price
         self.agent_id = agent_id
+        self.type = 'cancellation_by_price_volume'
     def __repr__(self) -> str:
         if self.partial_fill:
             return f'CancellationPV(filled_volume={self.filled_volume}, price={self.price}, partial_fill)'
