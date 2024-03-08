@@ -41,7 +41,12 @@ class SampleMarket:
                 terminated, info = M.step()
                 if terminated:
                     break
-            rewards.append(info['total_reward'])
+            if info['volume'] == 0:    
+                rewards.append(info['total_reward'])
+            elif info['volume'] > 0:
+                pass
+            else:
+                raise ValueError('volume is negative')
         return rewards
     
     def mp_sample(self, n_workers=1,seed=1):
@@ -53,49 +58,59 @@ class SampleMarket:
         return results
 
 if __name__ == '__main__':
-    SM = SampleMarket(terminal_time=int(1e3), n_samples=10, level=30, volume=40, imbalance_reaction=True, damping_factor=0.5, strategy='sl', strategic_investor=True, market_volume=1, limit_volume=5)
-    rewards = SM.sample(0)
-    print(np.mean(rewards))
-
-    total_samples = int(1e1)
-    n_workers  = 10
+    # SM = SampleMarket(terminal_time=int(1e3), n_samples=10, level=30, volume=40, imbalance_reaction=True, damping_factor=0.75, strategy='sl', strategic_investor=True, market_volume=1, limit_volume=5)
+    # rewards = SM.sample(0)
+    # print(np.mean(rewards))
+    
+    seed = 0 
+    total_samples = int(1e3)
+    n_workers  = 70
     n_samples = int(np.ceil(total_samples/n_workers))    
+    damping_factor = 1.0
     print(f'n_workers: {n_workers}')
     print(f'n_samples per worker: {n_samples}')
     print(f'total_samples: {n_workers*n_samples}')
     terminal_time = int(1e3)
-    volumes = [10, 20, 30, 40]
-    volumes = [20, 30]
+    volumes = [10, 20, 30, 40, 100]
     strategies = ['market', 'sl', 'linear_sl']
     market_environments = ['noise', 'flow', 'strategic']
+    market_environments = ['noise', 'flow']
 
-    start = time.time()
-
-    for me in market_environments:
-        data = {}
-        ######
-        for s in strategies:                
-            data[s] = []
-            for v in volumes:            
-                if me == 'noise':
-                    imbalance_reaction = False
-                    strategic_investor = False
-                if me == 'flow':
-                    imbalance_reaction = True
-                    strategic_investor = False
-                if me == 'strategic':
-                    imbalance_reaction = True
-                    strategic_investor = True
-                SM = SampleMarket(terminal_time=terminal_time, n_samples=n_samples, level=30, volume=v, imbalance_reaction=imbalance_reaction, damping_factor=0.5, strategy=s, strategic_investor=strategic_investor, market_volume=1, limit_volume=5)
-                rewards = SM.mp_sample(n_workers=n_workers)
-                rewards = list(itertools.chain(*rewards))
-                print(f'market environment: {me}, volume: {v}, strategy: {s}, mean reward: {np.mean(rewards)}')
-                data[s].append(np.mean(rewards))
-        #########
-        # print(data)
-        df = pd.DataFrame.from_dict(data)    
-        df.index = volumes
-        df.index.name = 'lots'
-        df = df.round(2)
-        print(df)
-        df.to_csv(f'./results/{me}_performance_benchmarks.csv')
+    # start a pool of workers 
+    seeds = [seed + i for i in range(n_workers)]#
+    with Pool(n_workers) as pool:
+        for me in market_environments:
+            start = time.time()
+            print('#######################')
+            print(f'market environment: {me}')
+            data = {}
+            ######
+            for s in strategies:            
+                print(f'strategy: {s}')  
+                data[f'{s}_m'] = []
+                data[f'{s}_std'] = []
+                for v in volumes:            
+                    if me == 'noise':
+                        imbalance_reaction = False
+                        strategic_investor = False
+                    if me == 'flow':
+                        imbalance_reaction = True
+                        strategic_investor = False
+                    if me == 'strategic':
+                        imbalance_reaction = True
+                        strategic_investor = True
+                    SM = SampleMarket(terminal_time=terminal_time, n_samples=n_samples, level=30, volume=v, imbalance_reaction=imbalance_reaction, damping_factor=damping_factor, strategy=s, strategic_investor=strategic_investor, market_volume=1, limit_volume=5)
+                    rewards = pool.map(SM.sample, seeds)
+                    rewards = list(itertools.chain(*rewards))
+                    # print(f'market environment: {me}, volume: {v}, strategy: {s}, mean reward: {np.mean(rewards)}')
+                    data[f'{s}_m'].append(np.mean(rewards))
+                    data[f'{s}_std'].append(np.std(rewards))
+            #########
+            # print(data)
+            df = pd.DataFrame.from_dict(data)    
+            df.index = volumes
+            df.index.name = 'lots'
+            df = df.round(2)
+            print(df)
+            df.to_csv(f'./results/performance_benchmarks_{me}_environment_damping_factor_{damping_factor}_sgn_imb.csv')
+            print('time for this environemnt: ', time.time() - start)
