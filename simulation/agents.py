@@ -156,8 +156,8 @@ class NoiseAgent():
             # c = 1.0
             # c = 0.0  
             # weights = np.exp(-self.damping_factor*np.arange(len(bid_volumes)))
-            weighted_bid_volumes = np.sum(self.damping_weights * bid_volumes)
-            weighted_ask_volumes = np.sum(self.damping_weights * ask_volumes)
+            weighted_bid_volumes = np.sum(self.damping_weights[:1] * bid_volumes[:1])
+            weighted_ask_volumes = np.sum(self.damping_weights[:1] * ask_volumes[:1])
             if (weighted_bid_volumes + weighted_ask_volumes) == 0:
                 imbalance = 0
             else:
@@ -168,6 +168,7 @@ class NoiseAgent():
                 print(ask_volumes)
                 raise ValueError('imbalance is nan')
             # imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
+            # imbalance = np.sign(imbalance)
             market_buy_intensity = self.market_intesity*(1+imbalance)
             market_sell_intensity = self.market_intesity*(1-imbalance)
         else:
