@@ -62,8 +62,6 @@ class BenchmarkAgent():
         return None 
     
     def generate_order(self, time, best_bid, best_ask):
-        if self.no_action:
-            return None
         if time == self.when_to_place:
             self.initial_bid = best_bid
         if self.strategy == 'sl':
@@ -135,11 +133,11 @@ class BenchmarkAgent():
 
 
 class Market(gym.Env):
-    def __init__(self, seed, no_action=False, terminal_time=int(1e3), volume=20, level=30, imbalance_reaction=False, damping_factor=0.5, strategic_investor=False, market_volume=2, limit_volume=5, frequency=50, strategy='market') -> None:
+    def __init__(self, seed, terminal_time=int(1e3), volume=20, level=30, imbalance_reaction=False, damping_factor=0.5, strategic_investor=False, market_volume=2, limit_volume=5, frequency=50, strategy='market') -> None:
         # total time steps to simulate
         self.terminal_time = terminal_time
         # initialize benchamrk agent here 
-        self.execution_agent = BenchmarkAgent(volume=volume, terminal_time=terminal_time, strategy=strategy, no_action=no_action)
+        self.execution_agent = BenchmarkAgent(volume=volume, terminal_time=terminal_time, strategy=strategy)
         # maybe levels into the config file always = 30 anwyays?
         self.noise_agent = NoiseAgent(level=level, rng=np.random.default_rng(seed) , imbalance_reaction=imbalance_reaction, initial_shape_file='data_small_queue.npz', config_n=1, damping_factor=damping_factor)
         if strategic_investor:
@@ -219,7 +217,7 @@ class Market(gym.Env):
 
 if __name__ == '__main__':
     # ToDO: implement benchmarks market, linear submit and leave 
-    M = Market(seed=2, imbalance_reaction=True,  terminal_time=1000, volume=40, level=30, damping_factor=1.0, market_volume=1, limit_volume=5, frequency=50, strategic_investor=True, strategy='linear_sl')
+    M = Market(seed=2, imbalance_reaction=True,  terminal_time=1000, volume=40, level=30, damping_factor=0.01, market_volume=1, limit_volume=5, frequency=50, strategic_investor=True, strategy='linear_sl')
     for _ in range(10):
         M.reset()
         # print(M.time)

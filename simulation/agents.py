@@ -156,8 +156,8 @@ class NoiseAgent():
             # c = 1.0
             # c = 0.0  
             # weights = np.exp(-self.damping_factor*np.arange(len(bid_volumes)))
-            weighted_bid_volumes = np.sum(self.damping_weights[:1] * bid_volumes[:1])
-            weighted_ask_volumes = np.sum(self.damping_weights[:1] * ask_volumes[:1])
+            weighted_bid_volumes = np.sum(self.damping_weights * bid_volumes)
+            weighted_ask_volumes = np.sum(self.damping_weights * ask_volumes)
             if (weighted_bid_volumes + weighted_ask_volumes) == 0:
                 imbalance = 0
             else:
