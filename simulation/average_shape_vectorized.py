@@ -28,7 +28,7 @@ class Market(gym.Env):
         return None
 
     def reset(self) :
-        self.lob = LimitOrderBook(list_of_agents=[self.noise_agent.agent_id], level=self.level)
+        self.lob = LimitOrderBook(list_of_agents=[self.noise_agent.agent_id], level=self.level, only_volumes=False)
         self.time = 0 
         orders = self.noise_agent.initialize()
         [self.lob.process_order(order) for order in orders]
@@ -69,7 +69,7 @@ if __name__ == '__main__':
     if parallel:
         level = 30
         n_envs = 8
-        T = 1e4
+        T = 1e5
 
         env_functions = [lambda: Market(seed=int(100*seed), terminal_time=int(T)) for seed in range(n_envs)]
         
@@ -119,7 +119,7 @@ if __name__ == '__main__':
     else:
 
         level = 30
-        T = 1e5
+        T = 1e4
 
         env = Market(seed=int(1), terminal_time=int(T))
         
@@ -136,10 +136,10 @@ if __name__ == '__main__':
                 print(t)
             t += 1 
 
-        print(f'time elapsed in minutes: {(time.time()-start)/60}')
+        print(f'time elapsed in seconds: {(time.time()-start)}')
 
+        # shapes 
         reduction = int(T/100)
-
         bid_volumes = np.vstack(env.lob.data.bid_volumes[::reduction])
         ask_volumes = np.vstack(env.lob.data.ask_volumes[::reduction])
         bid_shape = np.mean(bid_volumes, axis=0)
@@ -153,20 +153,23 @@ if __name__ == '__main__':
         plt.figure()
         plt.bar(np.arange(1000,1000-level,-1), bid_shape - env.noise_agent.initial_shape, color='b')
         plt.bar(np.arange(1001,1001+level,1), ask_shape - env.noise_agent.initial_shape, color='r')
-        plt.savefig('average_shape_difference.pdf')
+        # plt.savefig('average_shape_difference.pdf')
+        # plt.show()
 
-        # bid_volumes = np.vstack(env.lob.data.bid_volumes[-int(T/2):][::reduction])
-        # ask_volumes = np.vstack(env.lob.data.ask_volumes[-int(T/2):][::reduction])
-        # bid_shape = np.mean(bid_volumes[-int(T/2):][::reduction] , axis=0)
-        # ask_shape = np.mean(ask_volumes[-int(T/2):][::reduction], axis=0)    
+        bid_volumes = np.vstack(env.lob.data.bid_volumes[-int(T/2):][::reduction])
+        ask_volumes = np.vstack(env.lob.data.ask_volumes[-int(T/2):][::reduction])
+        bid_shape = np.mean(bid_volumes[-int(T/2):][::reduction] , axis=0)
+        ask_shape = np.mean(ask_volumes[-int(T/2):][::reduction], axis=0)    
 
-        # df, trades = env.lob.log_to_df()
+        df, trades = env.lob.log_to_df()
 
-        # plot_average_book_shape(bid_volumes=env.lob.data.bid_volumes, ask_volumes=env.lob.data.ask_volumes, level=30, symetric=False)
+        plot_average_book_shape(bid_volumes=env.lob.data.bid_volumes, ask_volumes=env.lob.data.ask_volumes, level=30, symetric=False)
 
-        # plot_prices(level2=df, trades=trades, marker_size=100)
+        plot_prices(level2=df, trades=trades, marker_size=100)
 
-        # heat_map(trades=trades, level2=df, max_level=5, scale=500, max_volume=50)
+        heat_map(trades=trades, level2=df, max_level=5, scale=500, max_volume=50)
+
+        plt.show()
 
         # reduction = int(T/100)
         # bid_volumes = np.vstack(env.lob.data.bid_volumes[-int(T/2):][::reduction])
