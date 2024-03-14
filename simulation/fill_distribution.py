@@ -24,7 +24,7 @@ sys.path.append(parent_dir)
 
 class Market(gym.Env):
     def __init__(self, rng, n_steps=int(1e3), config_n=1, n_samples=10, level=30, volume=10, side='ask', imbalance_reaction=False, place_at=1, initial_shape_file='data_small_queue.npz') -> None:
-        self.noise_agent = NoiseAgent(level=level, rng=rng, config_n=config_n, imbalance_reaction=imbalance_reaction, initial_shape_file=initial_shape_file)
+        self.noise_agent = NoiseAgent(level=level, rng=rng, config_n=config_n, imbalance_reaction=imbalance_reaction, initial_shape_file=initial_shape_file, damping_factor=0.0)
         self.level = level
         self.n_steps = n_steps
         self.volume = volume 
@@ -65,11 +65,10 @@ class Market(gym.Env):
         # print(order.type)
         out = self.lob.process_order(order)
         if order.type == 'market':
-            if out.filled_orders['smart_agent']:
-                if not self.lob.order_map_by_agent['smart_agent']:
-                    terminated = True
-                    return terminated
-                    # self.lob.process_order(out[0])
+            if not self.lob.order_map_by_agent['smart_agent']:
+                terminated = True
+                return terminated
+                # self.lob.process_order(out[0])
         self.time += 1
         return terminated
     
@@ -112,16 +111,16 @@ class SampleMarket:
  
 if __name__ == '__main__':
 
-    n_workers = 1
-    n_samples = int(1e2)
+    n_workers = 50
+    n_samples = int(20)
     max_steps = int(1e3)
     # volumes = [1, 2]
-    volumes = [20]
+    volumes = [20,40]
     # volumes = [1]
     # volumes = [1]
     # placed_at = [0,1,2,3]
     # placed_at = [0,1,2,3]
-    placed_at = [0]
+    placed_at = [0,1,2]
     reaction = [False, True]
     # reaction = [True]
     # reaction = [False]
