@@ -175,6 +175,7 @@ class LimitOrderBook:
         self.update_n = 0
         # order matters here !!!, first data, then logging 
         self.data = Data(level=level)
+        self.price_volume_map = {'bid': SortedDict(neg), 'ask': SortedDict()}
         # initialize state of the order book at step n = 0  
         # self._logging()
     
@@ -188,15 +189,19 @@ class LimitOrderBook:
         self.data.ask_prices.append(ask_prices)
         self.data.bid_volumes.append(bid_volumes)
         self.data.ask_volumes.append(ask_volumes)
-        # best bid/ask prices and volumes
-        best_bid_price = self.get_best_price('bid')
-        best_ask_price = self.get_best_price('ask')
-        best_bid_volume = self.volume_at_price('bid', best_bid_price)
-        best_ask_volume = self.volume_at_price('ask', best_ask_price)
-        self.data.best_bid_prices.append(best_bid_price)
-        self.data.best_ask_prices.append(best_ask_price)
-        self.data.best_bid_volumes.append(best_bid_volume)
-        self.data.best_ask_volumes.append(best_ask_volume)
+        # best bid/ask prices and volumes for easy look up 
+        best_bid = self.get_best_price('bid')
+        best_ask = self.get_best_price('ask')
+        self.data.best_bid_prices.append(best_bid)
+        self.data.best_ask_prices.append(best_ask)
+        if np.isnan(best_bid):
+            self.data.best_bid_volumes.append(np.nan)
+        else:
+            self.data.best_bid_volumes.append(self.price_volume_map['bid'][best_bid])
+        if np.isnan(best_ask):
+            self.data.best_ask_volumes.append(np.nan)
+        else:
+            self.data.best_ask_volumes.append(self.price_volume_map['ask'][best_ask])
     
 
     def process_order(self, order, log_order=True):
@@ -267,6 +272,12 @@ class LimitOrderBook:
         self.order_map[order.order_id] = order
         self.order_map_by_agent[order.agent_id].add(order.order_id)
 
+        # add order to price volume map
+        if order.price in self.price_volume_map[order.side]:
+            self.price_volume_map[order.side][order.price] += order.volume
+        else:
+            self.price_volume_map[order.side][order.price] = order.volume
+
         return LimitOrderFill(order_id=order.order_id, price=order.price, volume=order.volume, side=order.side, agent_id=order.agent_id)
 
 
@@ -289,9 +300,10 @@ class LimitOrderBook:
         # list of fill messages for each agent         
         passive_fills = DynamicDict()
 
+        remaining_market_volume = order.volume
         prices = list(self.price_map[side].keys())
         for price in prices: 
-            # cp = counterparty 
+            # cp = counterparty             
             cp_order_ids = deepcopy(self.price_map[side][price])
             for cp_order_id in cp_order_ids:
                 cp_order = self.order_map[cp_order_id]
@@ -321,10 +333,18 @@ class LimitOrderBook:
                     market_volume = market_volume - cp_order.volume
                 else:
                     raise ValueError("this should not happen")
+            # update level2 price volume map
+            diff = self.price_volume_map[side][price]-remaining_market_volume
+            self.price_volume_map[side][price] = max(diff, 0)
+            remaining_market_volume = max(-diff, 0)
             # if no more orders are left on the level, remove the entire price level
             if not self.price_map[side][price]:
                 self.price_map[side].pop(price)
-            if market_volume == 0.0:
+                assert self.price_volume_map[side][price] == 0 
+                self.price_volume_map[side].pop(price)
+            if market_volume == 0.0:                
+                assert remaining_market_volume == 0.0
+                assert diff >= 0
                 break
         
         # basic checks 
@@ -349,6 +369,11 @@ class LimitOrderBook:
         price = self.order_map[order.order_id].price
         volume = self.order_map[order.order_id].volume
         side = self.order_map[order.order_id].side
+        # update price volume map
+        self.price_volume_map[side][price] -= volume
+        assert self.price_volume_map[side][price] >= 0, "price volume map is negative"
+        if self.price_volume_map[side][price] == 0:
+            self.price_volume_map[side].pop(price)
         # remove 
         self.price_map[side][price].remove(id)
         self.order_map.pop(id)
@@ -406,10 +431,14 @@ class LimitOrderBook:
 
     def modification(self, order):
         assert order.volume <= self.order_map[order.order_id].volume, "new volume larger than original order volume"
-        assert 0 <= order.volume, "volume must be positive"
+        assert 0 < order.volume, "volume must be positive"
         # update volume 
         old_volume = self.order_map[order.order_id].volume
         self.order_map[order.order_id].volume = order.volume
+        # update price volume map 
+        diff = old_volume - order.volume
+        assert diff > 0, "diff must be positive"
+        self.price_volume_map[self.order_map[order.order_id].side][self.order_map[order.order_id].price] -= diff
         return ModificationConfirmation(order=order, new_volume=order.volume, old_volume=old_volume)
     
     def get_best_price(self, side):
@@ -432,6 +461,37 @@ class LimitOrderBook:
             return (bid_prices, bid_volumes)
         """        
         assert side in ['bid', 'ask'], "side must be either bid or ask"
+
+        if side == 'ask':
+            opposite_side = 'bid'  
+            sign = 1
+        else:
+            opposite_side = 'ask'
+            sign = -1
+        
+
+        # opposite side is empty
+        if not self.price_map[opposite_side]:
+            # side empty
+            if not self.price_map[side]:
+                return np.empty(self.level)*np.nan, np.empty(self.level)*np.nan
+            # side not empty 
+            else:                
+                # start counting from best price
+                best_price = self.get_best_price(side)
+                prices = np.arange(best_price, best_price+sign*self.level, sign)
+                # volumes = np.array([self.volume_at_price(side, price) for price in prices])
+                volumes = [self.price_volume_map[side][price] if price in self.price_map[side] else 0 for price in prices]
+                volumes = np.array(volumes)
+                return prices, volumes
+        # opposite side not empty
+        else:
+            best_price = self.get_best_price(opposite_side)
+            prices = np.arange(best_price+sign, best_price + sign + sign*self.level, sign)
+            volumes = [self.price_volume_map[side][price] if price in self.price_map[side] else 0 for price in prices]
+            volumes = np.array(volumes)
+            return prices, volumes
+
 
         if side == 'bid':
             if not self.price_map['ask']:
