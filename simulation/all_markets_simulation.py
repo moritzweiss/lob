@@ -88,8 +88,16 @@ class BenchmarkAgent():
     def reward(self, cash, volume):        
         self.r += (cash - volume * self.initial_bid) / self.initial_volume
         return None
+    
+    def update_position_from_message_list(self, message_list):
+        for m in message_list:
+            if self.update_position(m): 
+                return True
+        return False
+
 
     def update_position(self, fill_message):
+        # return True if agent has zero volume
         if fill_message.type == 'modification':
             # this agent doesnt modify orders
             pass
@@ -104,7 +112,7 @@ class BenchmarkAgent():
                 self.active_volume -= fill_message.volume
         elif fill_message.type == 'market':
             # check for potential fills 
-            if fill_message.agent_id == self.agent_id:
+            if fill_message.order.agent_id == self.agent_id:
                 self.active_volume -= fill_message.filled_volume
                 self.volume -= fill_message.filled_volume
                 self.market_fills += fill_message.filled_volume
@@ -116,7 +124,7 @@ class BenchmarkAgent():
                 volume = 0 
                 for m in fill_message.passive_fills[self.agent_id]:
                     volume += m.filled_volume
-                    cash += m.filled_volume * m.fill_price
+                    cash += m.filled_volume * m.order.price 
                 self.active_volume -= volume 
                 self.volume -= volume 
                 self.passive_fills += volume
@@ -147,7 +155,7 @@ class Market(gym.Env):
         return None 
     
     def transition(self):
-        # noise trader trades at every time step
+        # noise trader trades at every time step        
         order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         msg = self.lob.process_order(order)
         if self.execution_agent.update_position(msg):
@@ -156,12 +164,9 @@ class Market(gym.Env):
         if self.strategic_agent is not None:
             order_list = self.strategic_agent.generate_order(self.time, best_bid=self.lob.get_best_price('bid'), best_ask=self.lob.get_best_price('ask'))
             if order_list is not None:
-                # print(f'stratefic agent sends order at time {self.time}')
-                # print(order_list)
-                messages = [self.lob.process_order(order) for order in order_list]
-                for m in messages:
-                    if self.execution_agent.update_position(m):
-                        return True
+                msgs = [self.lob.process_order(order) for order in order_list]
+                if self.execution_agent.update_position_from_message_list(msgs):
+                    return True
         self.time += 1
         return False
     
