@@ -20,6 +20,7 @@ class TestOrderBook(unittest.TestCase):
         msg = LOB.process_order(order)
         v2 = np.sum(LOB.data.ask_volumes[-1][1])
         assert LOB.data.ask_volumes[-1][1] == 5 + 2 + 2 - 4 
+        assert LOB.price_volume_map['ask'][102] == 5 + 2 + 2 - 4
         assert LOB.order_map[LOB.price_map['ask'][102][-1]].agent_id == 'smart_agent'
         assert msg.filled_volume == v1-v2
 
@@ -37,6 +38,7 @@ class TestOrderBook(unittest.TestCase):
         msg = LOB.process_order(order)
         v2 = np.sum(LOB.data.ask_volumes[-1][0])
         assert LOB.data.ask_volumes[-1][0] == 2
+        assert LOB.price_volume_map['ask'][100] == 2
         assert msg.filled_volume == v1-v2
         assert msg.partial_fill == True
         assert 1 not in LOB.order_map
@@ -53,6 +55,7 @@ class TestOrderBook(unittest.TestCase):
         [LOB.process_order(order) for order in orders]
 
         assert LOB.data.bid_volumes[-1][0] == 10 + 1 + 2 - 2
+        assert LOB.price_volume_map['bid'][99] == 10 + 1 + 2 - 2
         assert LOB.order_map[LOB.price_map['bid'][99][-1]].agent_id == 'smart_agent'
 
 
@@ -94,6 +97,10 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'ask', 102, 10))
         orders.append(LimitOrder('noise_agent', 'ask', 102, 5))
         msg = [LOB.process_order(order) for order in orders]
+        assert LOB.price_volume_map['bid'][99] == 10
+        assert LOB.price_volume_map['bid'][100] == 5
+        assert LOB.price_volume_map['ask'][101] == 5
+        assert LOB.price_volume_map['ask'][102] == 15
         # [print(m) for m in msg]
         return None
 
@@ -108,20 +115,28 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'ask', 102, 5))
         orders.append(MarketOrder('smart_agent', 'bid', 10))
         msg = [LOB.process_order(order) for order in orders]
-        [print(m) for m in msg]
+        # [print(m) for m in msg]
+        assert LOB.price_volume_map['bid'][99] == 5
+        assert 100 not in LOB.price_volume_map['bid']
+        return None
 
 
-    def test_cancellation(self):
-        LOB = LimitOrderBook(smart_agent_id='smart_agent', noise_agent_id='noise_agent')
+    def test_cancellation_0(self):
+        LOB = LimitOrderBook(list_of_agents = ['smart_agent', 'noise_agent'])
         orders = []
         orders.append(LimitOrder('noise_agent', 'bid', 99, 10))
         orders.append(LimitOrder('noise_agent', 'bid', 100, 5))
         orders.append(LimitOrder('noise_agent', 'ask', 101, 5))
         orders.append(LimitOrder('noise_agent', 'ask', 102, 10))
         orders.append(LimitOrder('noise_agent', 'ask', 102, 5))
-        orders.append(Cancellation())
+        orders.append(Cancellation(order_id=3, agent_id='noise_agent'))
         msg = [LOB.process_order(order) for order in orders]
-        [print(m.msg) for m in msg]        
+        # [print(m.msg) for m in msg]        
+        assert LOB.price_volume_map['ask'][102] == 5
+        order = Cancellation(order_id=4, agent_id='noise_agent')
+        msg = LOB.process_order(order)
+        assert 102 not in LOB.price_volume_map['ask']
+        return None
     
 
     def test_limit_order_fill(self, partial_fill=False):
@@ -274,6 +289,7 @@ class TestOrderBook(unittest.TestCase):
         assert msg.volume == 3
         assert msg.side == 'ask'
         assert msg.order.agent_id == 'smart_agent'
+        assert LOB.price_volume_map['ask'][104] == 2
         return None 
     
 
@@ -297,9 +313,14 @@ class TestOrderBook(unittest.TestCase):
         assert 100 not in LOB.price_map['bid']
         assert len(LOB.price_map['bid'][99]) == 1
         assert LOB.order_map[LOB.price_map['bid'][99][0]] 
+        assert 100 not in LOB.price_volume_map['bid']
+        assert LOB.price_volume_map['bid'][99] == 2
         #####
         market_order = MarketOrder('smart_agent', 'ask', 8)
         msg = LOB.process_order(market_order)
+        assert 101 not in LOB.price_volume_map['ask']
+        assert 102 not in LOB.price_volume_map['ask']
+        assert LOB.price_volume_map['ask'][103]  == 2
         assert msg.execution_price == 101*5 + 102*2 + 103*1
         assert 101 not in LOB.price_map['ask']
         assert 102 not in LOB.price_map['ask']
@@ -315,11 +336,12 @@ class TestOrderBook(unittest.TestCase):
         orders.append(LimitOrder('noise_agent', 'bid', 100, 3))
         orders.append(LimitOrder('noise_agent', 'bid', 99, 3))
         orders.append(LimitOrder('noise_agent', 'ask', 101, 2))
-        orders.append(LimitOrder('noise_agent', 'ask', 103, 4))
+        orders.append(LimitOrder('noise_agent', 'ask', 103, 4)) #4
         [LOB.process_order(order) for order in orders]
         assert LOB.order_map[4].volume == 4
         order = Modification(order_id=4, agent_id='noise_agent', new_volume=1)
         msg = LOB.process_order(order)
+        assert LOB.price_volume_map['ask'][103] == 1 
         assert LOB.order_map[4].volume == 1    
         assert msg.new_volume == 1
         assert msg.old_volume == 4
@@ -355,6 +377,7 @@ if __name__ == '__main__':
     TLOB.test_limit_order_fill(partial_fill=True)
     TLOB.test_limit_order_fill(partial_fill=False)
     print('##########')
+    TLOB.test_cancellation_0()
     TLOB.test_cancellation()
     print('##########')
     TLOB.test_market_order()
