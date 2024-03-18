@@ -446,6 +446,13 @@ class LimitOrderBook:
 
         return CancellationByPriceVolumeMessage(order=order, affected_orders=msg_list, filled_volume=order.volume-volume, price=order.price, partial_fill=volume>0)
 
+    def process_order_list(self, order_list):
+        """
+        - process a list of orders 
+        - return a list of messages 
+        """
+        return [self.process_order(order) for order in order_list]
+
 
     def modification(self, order):
         assert not self.only_volumes, "only volumes option with modification not supported"
