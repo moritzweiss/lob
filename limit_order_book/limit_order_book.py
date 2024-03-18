@@ -3,6 +3,7 @@ from operator import neg
 from sortedcontainers import SortedDict, SortedList
 import numpy as np
 import pandas as pd
+import warnings
 
 class DynamicDict:
     def __init__(self):
@@ -317,7 +318,7 @@ class LimitOrderBook:
                 assert diff >= 0
                 break
         if remaining_market_volume > 0:
-            raise ValueError("market volume not fully executed")
+            warnings.warn("market volume not fully executed")
         if self.only_volumes:
             return None
 
