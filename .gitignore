@@ -9,3 +9,6 @@ results/
 .vscode/
 plots/
 tables/
+results/ 
+results/*
+results 
