@@ -40,7 +40,6 @@ class Market(gym.Env):
         orders = self.noise_agent.initialize()
         [self.lob.process_order(order) for order in orders]
         # placement by strategic investor  
-        order = LimitOrder('strategic_agent', 'ask', self.lob.get_best_price('ask'), 50)
         # 100 noise transitions 
         for _ in range(100):
             order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
@@ -58,12 +57,9 @@ class Market(gym.Env):
     
     def step(self):
         terminated = False
-        if self.time%100 == 0:
-            order = LimitOrder('strategic_agent', 'ask', self.lob.get_best_price('ask'), 50)                        
-            self.lob.process_order(order)
         order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
+        self.lob.process_order(order)
         # print(order.type)
-        out = self.lob.process_order(order)
         if order.type == 'market':
             if not self.lob.order_map_by_agent['smart_agent']:
                 terminated = True
@@ -115,7 +111,7 @@ if __name__ == '__main__':
     n_samples = int(20)
     max_steps = int(1e3)
     # volumes = [1, 2]
-    volumes = [20,40]
+    volumes = [40]
     # volumes = [1]
     # volumes = [1]
     # placed_at = [0,1,2,3]
@@ -192,6 +188,7 @@ if __name__ == '__main__':
     # data.index.name = 'level' 
     data = data.round(2)
     print(data)
+    data.to_csv(f'./results/fill_time_distribution.csv')
     # data.to_latex(f'tables/fill_time_distribution.tex', index=True, float_format="%.2f")
     # only vary the levels not volume
     # data.to_latex(f'tables/fill_time_distribution_per_level.tex', index=True, float_format="%.2f")

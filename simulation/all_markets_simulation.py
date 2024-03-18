@@ -54,10 +54,11 @@ class BenchmarkAgent():
         self.market_fills = 0
         self.strategy = strategy
         self.frequency = frequency
-        assert volume % 10 == 0 
+        assert volume % 10 == 0 or volume < 10
         assert self.when_to_place < self.terminal_time
         self.volume_slice = int(self.initial_volume/10)
-        assert self.volume_slice * 10 == self.volume 
+        if volume >=10:
+            assert self.volume_slice * 10 == self.volume 
         # self.no_action = no_action
         return None 
     

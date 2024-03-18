@@ -62,21 +62,17 @@ class Market(gym.Env):
         order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         out = self.lob.process_order(order)
         if order.type == 'market':
-            if out.filled_orders['smart_agent']:
-                for orders in out.filled_orders['smart_agent']:
-                    filled_volume = orders['filled_volume' ]
+            if 'smart_agent' in out.passive_fills:
+                for orders in out.passive_fills['smart_agent']:
+                    filled_volume = orders.filled_volume
                     self.volume -= filled_volume
                     self.filled_volume += filled_volume
-                    fill_price = orders['fill_price']
+                    fill_price = orders.order.price
                     self.reward += filled_volume * fill_price
                     if not self.linear_submit_and_leave:
                         v = [self.lob.order_map[id].volume for id in self.lob.order_map_by_agent['smart_agent']]
                         assert sum(v) == self.volume
-                    # []: False, not [] : True : list is empty  
-                    # self.lob.process_order(out[0])
                     if self.volume == 0:
-                        # print(f'time: {self.time}')
-                        # print(f'remaining volume: {self.volume}')
                         assert not self.lob.order_map_by_agent['smart_agent']
                         assert self.filled_volume == self.start_volume
                         terminated = True                    
@@ -158,15 +154,16 @@ if __name__ == '__main__':
     # 1000
     total_samples = int(1e3)
     # total_samples = int(5e2)
-    n_workers  = 70
+    n_workers  = 50
     n_samples = int(np.ceil(total_samples/n_workers))    
     print(f'n_workers: {n_workers}')
     print(f'n_samples: {n_samples}')
     print(f'total_samples: {n_workers*n_samples}')
     max_steps = int(1e3)
     # volumes = [1]
-    volumes = [10, 20, 30, 40]
-    volumes = [10, 20, 30, 40]
+    # volumes = [10, 20, 30, 40]
+    # volumes = [10, 20, 30, 40]
+    volumes = [10, 20, 40, 80]
     # volumes = [10, 40]
     # volumes = [20, 30]
     strategies = ['market', 'sl', 'linear_sl']
@@ -178,7 +175,7 @@ if __name__ == '__main__':
 
     start = time.time()
 
-    for damping_factor in [0.25, 0.5, 1.0]:
+    for damping_factor in [0.1, 0.25, 0.5, 1.0]:
         data = {}
         for imbalance_reaction in reactions:
             print('-------------------')

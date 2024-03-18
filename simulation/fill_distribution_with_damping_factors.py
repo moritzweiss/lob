@@ -99,15 +99,15 @@ class SampleMarket:
 
 if __name__ == '__main__':
 
-    n_workers = 8
-    n_samples = int(1e2)
+    n_workers = 50
+    n_samples = int(20)
     max_steps = int(1e3)
-    placed_at = [0, 1, 2, 3]
-    placed_at = [0, 1]
+    # placed_at = [0, 1, 2, 3]
+    placed_at = [0, 1, 2]
     # damping_factors = [0.0, 0.5, 1.0, 2.0]
     # damping_factors = ['no_imbalance', 0.0, 0.1, 0.25, 0.5, 1.0]
-    damping_factors = ['no_imbalance', 0.0, 0.5]
-    volumes = [10, 40]
+    damping_factors = ['no_imbalance', 0.1, 0.25, 0.5, 1.0]
+    volumes = [1, 10, 20, 40, 80]
     
     for volume in volumes:
         print('#######')
@@ -155,7 +155,7 @@ if __name__ == '__main__':
         data.columns.name = 'damping factor'
         data = data.round(2)
         print(data)
-        # data.to_csv(f'results/{volume}_lots_fill_probabilities.csv')
+        data.to_csv(f'results/{volume}_lots_fill_probabilities.csv')
 
 
     # plt.show()
