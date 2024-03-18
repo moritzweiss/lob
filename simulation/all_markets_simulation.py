@@ -44,23 +44,27 @@ class BenchmarkAgent():
     def __init__(self, volume, terminal_time, frequency=100, strategy='market') -> None:
         assert strategy in ['market', 'linear_sl', 'sl']
         self.when_to_place = 0 
-        self.initial_volume = volume
-        self.volume = volume
-        self.active_volume = 0
-        self.agent_id = 'sl_agent'
-        self.r = 0
-        self.terminal_time = terminal_time
-        self.passive_fills = 0
-        self.market_fills = 0
-        self.strategy = strategy
         self.frequency = frequency
+        self.initial_volume = volume
+        self.agent_id = 'sl_agent'
+        self.terminal_time = terminal_time
+        self.strategy = strategy
         assert volume % 10 == 0 or volume < 10
         assert self.when_to_place < self.terminal_time
-        self.volume_slice = int(self.initial_volume/10)
-        if volume >=10:
-            assert self.volume_slice * 10 == self.volume 
+        if volume >= 10:
+            self.volume_slice = int(self.initial_volume/10)
+            assert self.volume_slice * 10 == volume
         # self.no_action = no_action
+        # self.reset()
         return None 
+    
+    def reset(self):
+        self.volume = self.initial_volume
+        self.active_volume = 0
+        self.cummulative_reward = 0
+        self.passive_fills = 0
+        self.market_fills = 0
+        return None
     
     def generate_order(self, time, best_bid, best_ask):
         if time == self.when_to_place:
@@ -87,7 +91,7 @@ class BenchmarkAgent():
 
     
     def reward(self, cash, volume):        
-        self.r += (cash - volume * self.initial_bid) / self.initial_volume
+        self.cummulative_reward += (cash - volume * self.initial_bid) / self.initial_volume
         return None
     
     def update_position_from_message_list(self, message_list):
@@ -142,17 +146,39 @@ class BenchmarkAgent():
 
 
 class Market(gym.Env):
-    def __init__(self, seed, terminal_time=int(1e3), volume=20, level=30, imbalance_reaction=False, damping_factor=0.5, strategic_investor=False, market_volume=2, limit_volume=5, frequency=50, strategy='market') -> None:
-        # total time steps to simulate
+    def __init__(self, seed, type='noise', benchmark_agent='market', terminal_time=int(1e3), volume=20, level=30, damping_factor=0.5, market_volume=2, limit_volume=5, frequency=50) -> None:
+        """ 
+            - seed: controls seeding for the noise agent. other agents are deterministic 
+            - type: noise, flow, strategic controls the type of market environment
+            - benchmark_agent: None, market, linear_sl, sl, controls the type of benchmark agent (set to None without benchmark)
+            - terminal_time: the time at which the environment terminates
+            - market, limit volume and frequency are parameters for the strategic agent
+            - damping factor is the exponential damping factor for the noise agent 
+            - volume: how much volume the agent trades 
+
+            TODO : 
+            - damping factor should move into a config file once it is fixed 
+            - level and terminal time should be moved into a config file 
+            - market, limit, frequency, should be moved into a config file 
+            - we should have one config option. like config=1 sets the options for all the other environments 
+            
+        """ 
         self.terminal_time = terminal_time
-        # initialize benchamrk agent here 
-        self.execution_agent = BenchmarkAgent(volume=volume, terminal_time=terminal_time, strategy=strategy)
-        # maybe levels into the config file always = 30 anwyays?
-        self.noise_agent = NoiseAgent(level=level, rng=np.random.default_rng(seed) , imbalance_reaction=imbalance_reaction, initial_shape_file='data_small_queue.npz', config_n=1, damping_factor=damping_factor)
-        if strategic_investor:
-            self.strategic_agent = StrategicAgent(frequency=frequency, market_volume=market_volume, limit_volume=limit_volume, rng=np.random.default_rng(seed))
+        # initialize benchmark agent here 
+        if benchmark_agent is not None:
+            self.execution_agent = BenchmarkAgent(volume=volume, terminal_time=terminal_time, strategy=benchmark_agent)
         else:
-            self.strategic_agent = None 
+            self.execution_agent = None
+        # types of market environments 
+        if type == 'noise':
+            self.noise_agent = NoiseAgent(level=level, rng=np.random.default_rng(seed) , imbalance_reaction=False, initial_shape_file='data_small_queue.npz', config_n=1, damping_factor=damping_factor)
+            self.strategic_agent = None
+        elif type == 'flow':
+            self.noise_agent = NoiseAgent(level=level, rng=np.random.default_rng(seed) , imbalance_reaction=True, initial_shape_file='data_small_queue.npz', config_n=1, damping_factor=damping_factor)
+            self.strategic_agent = None
+        elif type == 'strategic':
+            self.noise_agent = NoiseAgent(level=level, rng=np.random.default_rng(seed) , imbalance_reaction=True, initial_shape_file='data_small_queue.npz', config_n=1, damping_factor=damping_factor)
+            self.strategic_agent = StrategicAgent(frequency=frequency, market_volume=market_volume, limit_volume=limit_volume, rng=np.random.default_rng(seed))
         return None 
     
     def transition(self):
@@ -175,22 +201,19 @@ class Market(gym.Env):
         # reset strategic agent 
         if self.strategic_agent is not None:
             self.strategic_agent.reset()
-        # reset execution agent 
-        self.execution_agent.r = 0
-        self.execution_agent.passive_fills = 0
-        self.execution_agent.market_fills = 0
-        self.execution_agent.volume = self.execution_agent.initial_volume
-        self.execution_agent.active_volume = 0
-        # 
+        # reset execution agent, this will set the direction for the execution agent 
+        self.execution_agent.reset()
+        # time of the simulation 
         self.time = -50
-        # initialize the order book, alternatively we could also implement a reset function for the order book 
-        if self.strategic_agent is not None:
-            self.lob = LimitOrderBook(level=self.noise_agent.level, list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id, self.strategic_agent.agent_id]) 
+        # initialize the order book and register agents 
+        if self.strategic_agent is None:
+            list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id]
         else:
-            self.lob = LimitOrderBook(level=self.noise_agent.level, list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id])
-        # initialize book with noise agent 
+            list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id, self.strategic_agent.agent_id]
+        self.lob = LimitOrderBook(level=self.noise_agent.level, list_of_agents = list_of_agents)
+        # fill the book with initial limit orders 
         orders = self.noise_agent.initialize()
-        [self.lob.process_order(order) for order in orders]
+        self.lob.process_order_list(orders)        
         # run 50 transitions 
         for _ in range(50):
             out = self.transition()
@@ -218,20 +241,17 @@ class Market(gym.Env):
         return False, {}
     
     def final_info(self):
-        return {'total_reward': self.execution_agent.r, 'time': self.time, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 'passive':self.execution_agent.passive_fills, 'market': self.execution_agent.market_fills}
+        return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.time, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 'passive':self.execution_agent.passive_fills, 'market': self.execution_agent.market_fills}
 
 
 if __name__ == '__main__':
     # ToDO: implement benchmarks market, linear submit and leave 
-    M = Market(seed=2, imbalance_reaction=True,  terminal_time=1000, volume=40, level=30, damping_factor=0.01, market_volume=1, limit_volume=5, frequency=50, strategic_investor=True, strategy='linear_sl')
+    M = Market(seed=2, type='flow', benchmark_agent='sl', volume=10)
     for _ in range(10):
         M.reset()
-        # print(M.time)
         terminated = False 
         while not terminated:
             terminated, info = M.step()
         print(info)
         data, orders = M.lob.log_to_df()
-    # heat_map(trades=orders, level2=data, max_level=5, max_volume=30, scale=500)
-    # plt.show()
 
