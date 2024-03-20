@@ -80,6 +80,7 @@ class Modification(Order):
 # confirmation messages
 class ModificationConfirmation():
     def __init__(self, order, new_volume, old_volume):
+        assert new_volume <= old_volume, "new volume must be smaller than old volume"
         self.order = order
         self.new_volume = new_volume
         self.old_volume = old_volume
@@ -102,6 +103,7 @@ class LimitOrderFill():
 
 class PassiveFill():
     def __init__(self, order, filled_volume, partial_fill):
+        assert filled_volume > 0, "filled volume must be positive"
         self.order = order 
         self.filled_volume = filled_volume
         self.partial_fill = partial_fill
@@ -360,6 +362,8 @@ class LimitOrderBook:
                     filled_volume += cp_order.volume
                     execution_price += price * cp_order.volume
                     market_volume = market_volume - cp_order.volume
+                    if market_volume == 0.0:
+                        break
                 else:
                     raise ValueError("this should not happen")
             # if no more orders are left on the level, remove the entire price level
@@ -518,35 +522,6 @@ class LimitOrderBook:
             volumes = np.array(volumes)
             return prices, volumes
 
-
-        if side == 'bid':
-            if not self.price_map['ask']:
-                if not self.price_map['bid']:
-                    return np.empty(self.level)*np.nan, np.empty(self.level)*np.nan
-                else:
-                    prices = np.arange(self.get_best_price('bid'), self.get_best_price('bid')-self.level, -1)
-            else:
-                prices = np.arange(self.get_best_price('ask')-1, self.get_best_price('ask')-self.level-1, -1)
-        
-        if side == 'ask':
-            if not self.price_map['bid']:
-                if not self.price_map['ask']:
-                    return np.empty(self.level)*np.nan, np.empty(self.level)*np.nan 
-                else:
-                    prices = np.arange(self.get_best_price('ask'), self.get_best_price('ask')+self.level, 1)
-            else:
-                prices = np.arange(self.get_best_price('bid')+1, self.get_best_price('bid')+self.level+1, 1)
-
-        volumes = []
-        for price in prices:
-            if price in self.price_map[side]:
-                volumes.append(self.volume_at_price(side, price))
-            else:
-                volumes.append(0)
-        
-        volumes = np.array(volumes)
-
-        return prices, volumes
     
     def volume_at_price(self, side, price):
         if price not in self.price_volume_map[side]:
