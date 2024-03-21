@@ -12,3 +12,4 @@ tables/
 results/ 
 results/*
 results 
+train/ray_results/
