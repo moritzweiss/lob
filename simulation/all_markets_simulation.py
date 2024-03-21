@@ -1,4 +1,10 @@
 from os import environ
+import os 
+import sys 
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+sys.path.append(current_dir)
 N_THREADS = '1'
 environ['OMP_NUM_THREADS'] = N_THREADS
 environ['OPENBLAS_NUM_THREADS'] = N_THREADS
@@ -14,6 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import warnings
 from gymnasium.spaces import Box
+import os
 
 # TODO: test benchmark strategies. Test that rewards are as expected. Can just hand code an environemnt for this. 
 
@@ -308,7 +315,8 @@ class StrategicAgent():
         return None
 
 class Market(gym.Env):
-    def __init__(self, seed, type='noise', execution_agent='market', terminal_time=int(1e3), volume=20, level=30, damping_factor=0.5, market_volume=2, limit_volume=5, frequency=50) -> None:
+    def __init__(self, config):                
+                #  seed, type='noise', execution_agent='market', terminal_time=int(1e3), volume=20, level=30, damping_factor=0.5, market_volume=2, limit_volume=5, frequency=50) -> None:
         """ 
             - seed: controls seeding for the noise agent. other agents are deterministic 
             - type: noise, flow, strategic controls the type of market environment
@@ -326,43 +334,46 @@ class Market(gym.Env):
             
         """ 
         # initialize execution agent 
-        if execution_agent == 'market_agent':
-            self.execution_agent = MarketAgent(volume=volume)
-        elif execution_agent == 'sl_agent':
-            self.execution_agent = SubmitAndLeaveAgent(volume=volume, terminal_time=terminal_time)
-        elif execution_agent == 'linear_sl_agent':
-            self.execution_agent = LinearSubmitLeaveAgent(volume=volume, terminal_time=terminal_time, frequency=100)
-        elif execution_agent == 'rl_agent':
-            self.execution_agent = RLAgent(volume=volume, terminal_time=terminal_time)
-        elif execution_agent == None:
+        if config['execution_agent'] == 'market_agent':
+            self.execution_agent = MarketAgent(volume=config['volume'])
+        elif config['execution_agent'] == 'sl_agent':
+            self.execution_agent = SubmitAndLeaveAgent(volume=config['volume'], terminal_time=config['terminal_time'])
+        elif config['execution_agent'] == 'linear_sl_agent':
+            self.execution_agent = LinearSubmitLeaveAgent(volume=config['volume'], terminal_time=config['terminal_time'], frequency=100)
+        elif config['execution_agent'] == 'rl_agent':
+            self.execution_agent = RLAgent(volume=config['volume'], terminal_time=config['terminal_time'])
+        elif config['execution_agent'] == None:
             self.execution_agent = None   
         else:
-            raise ValueError(f'Unknown value for execution agent {execution_agent}')
+            raise ValueError(f"Unknown value for execution agent {config['execution_agent']}")
         
         # setting market environment 
-        assert type in ['noise', 'flow', 'strategic'], f'Unknown type {type}'
+        assert config['type'] in ['noise', 'flow', 'strategic'], f'Unknown type {config["type"]}'
 
         # setting noise agent
-        if type == 'noise':
+        if config['type'] == 'noise':
             imbalance = False
         else:
             imbalance = True
-        self.noise_agent = NoiseAgent(level=level, rng=np.random.default_rng(seed), imbalance_reaction=imbalance, initial_shape_file='data_small_queue.npz', config_n=1, damping_factor=damping_factor)
+        self.noise_agent = NoiseAgent(level=config['level'], rng=np.random.default_rng(config['seed']), imbalance_reaction=imbalance, initial_shape_file=f'{parent_dir}/data_small_queue.npz', config_n=1, damping_factor=0.5)
         
         # setting strategic agent
-        if type == 'strategic':
-            self.strategic_agent = StrategicAgent(frequency=frequency, market_volume=market_volume, limit_volume=limit_volume, rng=np.random.default_rng(seed))
+        if config['type'] == 'strategic':
+            self.strategic_agent = StrategicAgent(frequency=50, market_volume=2, limit_volume=5, rng=np.random.default_rng(config['seed']))
         else:
             self.strategic_agent = None
 
         # terminal time
-        self.terminal_time = terminal_time
+        self.terminal_time = config['terminal_time']
 
         # observation space is time and inventory 
-        self.observation_space = Box(low=-1, high=1, shape=(2,), seed=seed, dtype=np.float32) 
+        self.observation_space = Box(low=-1, high=1, shape=(2,), seed=config['seed'], dtype=np.float32) 
 
         # action space [m, l1, l2, l3, inactive]
-        self.action_space = Box(low=-10, high=10, shape=(5,), seed=seed, dtype=np.float32)
+        self.action_space = Box(low=-10, high=10, shape=(5,), seed=config['seed'], dtype=np.float32)
+
+        #
+        super().reset(seed=config['seed'])
 
 
     def transition(self):
@@ -378,7 +389,8 @@ class Market(gym.Env):
         assert self.execution_agent.volume >= 0
         return reward
 
-    def reset(self):
+    def reset(self, seed=None, options={}):
+        super().reset(seed=seed)
         # reset strategic agent 
         if self.strategic_agent is not None:
             self.strategic_agent.reset()
@@ -401,7 +413,7 @@ class Market(gym.Env):
         # return the observation
         observation = self.execution_agent.get_observation(self.time, self.lob)
         reward = 0
-        return observation, reward, True, False, self.final_info()
+        return observation, {}
     
     def place_and_update_position(self, order):
         if order is None:
@@ -449,11 +461,13 @@ class Market(gym.Env):
     
     def final_info(self):
         return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.time, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 'initial_bid': self.execution_agent.reference_bid_price, 'passive':self.execution_agent.passive_fills, 'market': self.execution_agent.market_fills}
-    
+
+config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':2, 'limit_volume':5, 'frequency':50}  
+
 
 if __name__ == '__main__': 
-    # M = MarketAgent(volume=100, terminal_time=1000, frequency=100)
-    M = Market(seed=7, type='flow', execution_agent='rl_agent', volume=40)
+    config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
+    M = Market(config)
     for n in range(10):
         print(f'episode {n}')
         M.reset()
