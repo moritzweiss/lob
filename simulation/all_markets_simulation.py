@@ -15,7 +15,7 @@ import numpy as np
 import warnings
 from gymnasium.spaces import Box
 
-# TODO: test benchmark strategies
+# TODO: test benchmark strategies. Test that rewards are as expected. Can just hand code an environemnt for this. 
 
 class DummyAgent():
   """
@@ -190,6 +190,7 @@ class RLAgent(ExecutionAgent):
         best_bid = lob.get_best_price('bid')
 
         action = np.exp(action) / np.sum(np.exp(action), axis=0)
+        # print(action.round(2))
 
         order_list = []
         
@@ -267,7 +268,6 @@ class RLAgent(ExecutionAgent):
         self.orders_within_range = orders_within_range
         self.volume_per_level = volume_per_level
         assert sum(self.volume_per_level) <= self.volume
-        # active remaining volume volume which is still posted in the book, but not on the first three levels 
         return np.array([time/self.terminal_time, self.volume/self.initial_volume], dtype=np.float32)
             
 class StrategicAgent():
@@ -286,7 +286,7 @@ class StrategicAgent():
     
     def generate_order(self, time, lob):        
         if time % self.frequency == 0: 
-            if self.direction == 'sell':
+            if self.direction == 'sell':                
                 limit_price = lob.get_best_price('bid')+1
                 order_list = []
                 order_list.append(MarketOrder(self.agent_id, 'bid', self.market_order_volume))
@@ -418,10 +418,6 @@ class Market(gym.Env):
         reward = 0 
         # orders by execution agent
         if self.execution_agent.agent_id == 'rl_agent':
-            # if self.time == 0:
-            #     order = LimitOrder(self.execution_agent.agent_id, side='ask', price=self.lob.get_best_price('bid')+1, volume=self.execution_agent.volume)
-            # else:
-            #     pass 
             order = self.execution_agent.generate_order(self.time, self.lob, action)
         else:
             order = self.execution_agent.generate_order(self.time, self.lob)        
@@ -458,17 +454,16 @@ class Market(gym.Env):
 if __name__ == '__main__': 
     # M = MarketAgent(volume=100, terminal_time=1000, frequency=100)
     M = Market(seed=7, type='flow', execution_agent='rl_agent', volume=40)
-    for _ in range(10):
+    for n in range(10):
+        print(f'episode {n}')
         M.reset()
-        # print(action) 
         terminated = False 
         while not terminated:
             action = M.action_space.sample()
             observation, reward, terminated, truncated, info = M.step(action)
-            # print(f'execution agent volume distribution: {M.execution_agent.volume_per_level}')
-            print(f'observation: {observation}') 
+            # print(f'observation: {observation}') 
             print(f'reward: {reward}')
-        print(f'termindated: {terminated}')
+        # print(f'termindated: {terminated}')
         print(f'info: {info}')
     data, orders = M.lob.log_to_df()
     heat_map(orders, data, max_level=5, max_volume=50, scale=500)
