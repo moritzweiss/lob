@@ -32,23 +32,26 @@ model_config = { # By default, the MODEL_DEFAULTS dict above will be used.
 model_config = {"vf_share_layers": False} 
 
 
-config = (PPOConfig().rollouts(num_rollout_workers=40, batch_mode='complete_episodes', observation_filter='NoFilter')
+config = (PPOConfig().rollouts(num_rollout_workers=2, batch_mode='complete_episodes', observation_filter='NoFilter')
         .framework('torch')
+        # .resources(num_gpus=0.25, local_gpu_idx=1)
         .resources(num_gpus=0)
         .environment(env=Market, env_config=config)
-        # .training(train_batch_size=1024, gamma=1.0, lr = 1e-3, sgd_minibatch_size=256 , num_sgd_iter=1 , use_kl_loss=False , clip_param=tune.grid_search([0.3, 0.5, 1.0, 3.0]) , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0, model=model_config)
-        .training(train_batch_size=1024, gamma=1.0, lr = 1e-3, sgd_minibatch_size=256 , num_sgd_iter=2 , use_kl_loss=False , clip_param=tune.grid_search([1.0]) , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0, model=model_config)
+        # .training(train_batch_size=1024, gamma=1.0, lr = 1e-3, sgd_minibatchize=256 , num_sgd_iter=1 , use_kl_loss=False , clip_param=tune.grid_search([0.3, 0.5, 1.0, 3.0]) , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0, model=model_config)
+        .training(train_batch_size=2048, gamma=1.0, lr = 1e-3, sgd_minibatch_size=512 , num_sgd_iter=1 , use_kl_loss=False , clip_param=1.0 , vf_clip_param=100.0, use_gae=False, use_critic=True, vf_loss_coeff=1.0, model=model_config)
         .debugging(fake_sampler=False)
+        .evaluation(evaluation_num_workers=1, evaluation_interval=10, evaluation_duration=1000, evaluation_duration_unit='episodes', evaluation_config={'explore': False, 'env_config': env_config})
         .environment(disable_env_checking=True)
         .reporting(metrics_num_episodes_for_smoothing=500)
         # .rl_module(_enable_rl_module_api=False)
         ) 
 
 
+# trainable_with_resources = tune.with_resources(trainable, {"cpu": 4})
 tuner = tune.Tuner(
     "PPO",
     run_config=air.RunConfig(
-        stop={"training_iteration": 100}, storage_path = f"{parent_dir}/ray_results",  name = f"{env_config['volume']}_{env_config['type']}", 
+        stop={"training_iteration": 50}, storage_path = f"{parent_dir}/ray_results",  name = f"{env_config['volume']}_{env_config['type']}", 
         checkpoint_config=air.CheckpointConfig(checkpoint_frequency=5, checkpoint_at_end=True, checkpoint_score_order='max', 
                                                checkpoint_score_attribute='episode_reward_mean'), verbose=1,
     ),

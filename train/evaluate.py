@@ -20,11 +20,12 @@ import pandas as pd
 env_config = config.copy()
 
 # restore best agent 
-path = f'{current_dir}/ray_results/40_noise'
+path = f'{parent_dir}/ray_results/40_noise'
 analysis = tune.ExperimentAnalysis(path, default_metric="episode_reward_mean", default_mode="max")
 best_trial = analysis.get_best_trial(metric="episode_reward_mean", mode="max", scope="last")
 config = analysis.get_best_config()
 path = analysis.get_best_checkpoint(trial=best_trial, mode="max", metric="episode_reward_mean")
+print(f'best checkpoint: {path}')
 config['num_workers'] = 1
 # config['num_workers'] = 1
 AC = PPOConfig()
@@ -33,12 +34,14 @@ agent = AC.build()
 agent.restore(path)    
 
 
-n = 5000
+n = int(1e3)
 # sample from market environment 
 results = {}
 rewards = []
 M = Market(config=env_config)
 for n in range(n):
+    if n%100 == 0:
+        print(f'episode {n}')
     # print(f'episode {n}')
     observation, _ = M.reset()
     terminated = False 
@@ -59,6 +62,8 @@ rewards = []
 env_config['execution_agent'] = 'sl_agent'
 M = Market(config=env_config)
 for n in range(n):
+    if n%100 == 0:
+        print(f'episode {n}')
     # print(f'episode {n}')
     observation, _ = M.reset()
     terminated = False 
