@@ -57,6 +57,7 @@ class ExecutionAgent():
         return sum(rewards)
 
     def update_position(self, fill_message):
+        reward = 0 
         # return True if agent has zero volume
         assert self.active_volume >= 0
         assert self.volume >= 0
@@ -87,9 +88,8 @@ class ExecutionAgent():
                 # self.active_volume -= fill_message.filled_volume
                 self.volume -= fill_message.filled_volume
                 self.market_fills += fill_message.filled_volume
-                reward = self.get_reward(fill_message.execution_price, fill_message.filled_volume)
+                reward += self.get_reward(fill_message.execution_price, fill_message.filled_volume)
                 self.cummulative_reward += reward
-                return reward
             # this is if the agent received passive fills. in principle both are possible. 
             if self.agent_id in fill_message.passive_fills:
                 cash = 0
@@ -100,11 +100,12 @@ class ExecutionAgent():
                 self.active_volume -= volume 
                 self.volume -= volume 
                 self.passive_fills += volume
-                reward = self.get_reward(cash, volume)
+                reward += self.get_reward(cash, volume)
                 self.cummulative_reward += reward
                 assert self.active_volume >= 0
                 assert self.volume >= 0
                 assert self.volume >= 0
+            return reward
         else: 
             raise ValueError(f'Unknown message type {fill_message.type}')
         return 0 
@@ -469,14 +470,19 @@ if __name__ == '__main__':
     config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
     M = Market(config)
     for n in range(10):
+        r = 0 
         print(f'episode {n}')
         M.reset()
         terminated = False 
         while not terminated:
             action = M.action_space.sample()
             observation, reward, terminated, truncated, info = M.step(action)
+            # print(observation)
+            # print(r)
+            r += reward
             # print(f'observation: {observation}') 
-            print(f'reward: {reward}')
+        print(f'reward: {r}')
+        # print(f"info: {info['total_reward']}")
         # print(f'termindated: {terminated}')
         print(f'info: {info}')
     data, orders = M.lob.log_to_df()
