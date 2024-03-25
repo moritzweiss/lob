@@ -13,3 +13,4 @@ results/
 results/*
 results 
 train/ray_results/
+ray_results
