@@ -44,9 +44,11 @@ class ExecutionAgent():
         self.volume = self.initial_volume
         self.active_volume = 0
         self.cummulative_reward = 0
-        self.passive_fills = 0
-        self.market_fills = 0
         self.reference_bid_price = None
+        self.market_buys = 0 
+        self.market_sells = 0
+        self.limit_buys = 0
+        self.limit_sells = 0
 
     def get_reward(self, cash, volume):        
         assert self.reference_bid_price is not None, 'reference bid price is not set'
@@ -58,53 +60,70 @@ class ExecutionAgent():
 
     def update_position(self, fill_message):
         reward = 0 
-        # return True if agent has zero volume
         assert self.active_volume >= 0
         assert self.volume >= 0
-        assert self.passive_fills >= 0
-        assert self.market_fills >= 0
+        assert self.limit_buys >= 0
+        assert self.limit_sells >= 0
+        assert self.market_buys >= 0
+        assert self.market_sells >= 0
         assert self.active_volume <= self.volume
-        assert self.market_fills + self.passive_fills <= self.initial_volume
+        assert self.market_buys + self.market_sells + self.limit_buys + self.limit_sells <= self.initial_volume
         if fill_message.type == 'modification':
             # this agent doesnt modify orders
+            print('MODIFICATION but we do not update the position!')
             pass
         elif fill_message.type == 'cancellation_by_price_volume':
-            # this agent doesn cancel orders by price and volume
+            # Note: cancellation by price and volume could also return a list of cancellations and modifications
             if fill_message.order.agent_id == self.agent_id:
                 self.active_volume -= fill_message.filled_volume
-                assert self.active_volume >= 0
-                assert self.active_volume <= self.volume
             else:
                 pass
         elif fill_message.type == 'limit':
             if fill_message.agent_id == self.agent_id:
+                # this means the limit order was send into the book by the agent 
                 self.active_volume += fill_message.volume
         elif fill_message.type == 'cancellation':
             if fill_message.order.agent_id == self.agent_id:
                 self.active_volume -= fill_message.volume
         elif fill_message.type == 'market':
-            # this is if the agent send the order 
+            # check for active market trades             
+            side = fill_message.order.side
             if fill_message.order.agent_id == self.agent_id:
-                # self.active_volume -= fill_message.filled_volume
-                self.volume -= fill_message.filled_volume
-                self.market_fills += fill_message.filled_volume
-                reward += self.get_reward(fill_message.execution_price, fill_message.filled_volume)
-                self.cummulative_reward += reward
-            # this is if the agent received passive fills. in principle both are possible. 
+                assert side == 'bid', 'this execution agent only sells'
+                # ask means buy --> volume increases, negative cash flow 
+                if side == 'ask':
+                    self.volume += fill_message.filled_volume
+                    self.market_buys += fill_message.filled_volume
+                    reward -= self.get_reward(fill_message.execution_price, fill_message.filled_volume)
+                    self.cummulative_reward -= reward
+                # bid means sell --> volume decreases, positive cash flow
+                elif side == 'bid':
+                    self.volume -= fill_message.filled_volume
+                    self.market_sells += fill_message.filled_volume
+                    reward += self.get_reward(fill_message.execution_price, fill_message.filled_volume)
+                    self.cummulative_reward += reward
+            # check for passive limit order fills 
             if self.agent_id in fill_message.passive_fills:
+                assert side == 'ask', 'this execution agent only sells'
                 cash = 0
                 volume = 0 
                 for m in fill_message.passive_fills[self.agent_id]:
                     volume += m.filled_volume
                     cash += m.filled_volume * m.order.price 
-                self.active_volume -= volume 
-                self.volume -= volume 
-                self.passive_fills += volume
-                reward += self.get_reward(cash, volume)
-                self.cummulative_reward += reward
-                assert self.active_volume >= 0
-                assert self.volume >= 0
-                assert self.volume >= 0
+                # market side is ask, market buy --> limit sell 
+                if side == 'ask':
+                    self.active_volume -= volume
+                    self.volume -= volume
+                    self.limit_sells += volume
+                    reward += self.get_reward(cash, volume)
+                    self.cummulative_reward += reward
+                # market side is bid, market sell --> limit buy
+                elif side == 'bid':
+                    self.active_volume -= volume
+                    self.volume += volume
+                    self.limit_buys += volume
+                    reward -= self.get_reward(cash, volume)
+                    self.cummulative_reward -= reward
             return reward
         else: 
             raise ValueError(f'Unknown message type {fill_message.type}')
@@ -461,7 +480,8 @@ class Market(gym.Env):
         return observation, reward, False, False, {}
     
     def final_info(self):
-        return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.time, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 'initial_bid': self.execution_agent.reference_bid_price, 'passive':self.execution_agent.passive_fills, 'market': self.execution_agent.market_fills}
+        return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.time, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 'initial_bid': self.execution_agent.reference_bid_price, 'limit_sell':self.execution_agent.limit_sells, 'market_sell': self.execution_agent.market_sells}
+
 
 config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':2, 'limit_volume':5, 'frequency':50}  
 
@@ -469,7 +489,7 @@ config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time
 if __name__ == '__main__': 
     config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
     M = Market(config)
-    for n in range(10):
+    for n in range(2):
         r = 0 
         print(f'episode {n}')
         M.reset()
@@ -477,8 +497,6 @@ if __name__ == '__main__':
         while not terminated:
             action = M.action_space.sample()
             observation, reward, terminated, truncated, info = M.step(action)
-            # print(observation)
-            # print(r)
             r += reward
             # print(f'observation: {observation}') 
         print(f'reward: {r}')
