@@ -5,18 +5,25 @@ sys.path.append(parent_dir)
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray import air 
 from ray import tune
+import ray 
 import copy 
 from ray.rllib.models import MODEL_DEFAULTS
 from gymnasium.utils.env_checker import check_env
 from simulation.all_markets_simulation import Market, config 
 import sys
 
+# import os
+# Set RAY_DEDUP_LOGS to 0
+# os.environ["RAY_DEDUP_LOGS"] = "0"
 
+
+# ray.init(RAY_DEDUP_LOGS=0)
 
 # ray.init(local_mode=args.local_mode)
 env_config = config.copy()
-M = Market(config=env_config)
-check_env(M)
+# M = Market(config=env_config)
+# check_env(M)
+
 
 # custom config 
 custom_config = copy.deepcopy(MODEL_DEFAULTS)
@@ -47,7 +54,7 @@ config = (PPOConfig().rollouts(num_rollout_workers=40, batch_mode='complete_epis
         .environment(disable_env_checking=True)
         .reporting(metrics_num_episodes_for_smoothing=500)
         # .rl_module(_enable_rl_module_api=False)
-        .evaluation(evaluation_interval=10, evaluation_duration=1000, evaluation_num_workers=10, evaluation_duration_unit='episodes', evaluation_config={'explore': False, 'env_config': env_config})
+        .evaluation(evaluation_interval=10, evaluation_duration=1000, evaluation_num_workers=10, evaluation_duration_unit='episodes', evaluation_config={'explore': False, 'env_config': env_eval_config})
         ) 
 
 

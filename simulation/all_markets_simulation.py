@@ -5,12 +5,12 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 sys.path.append(current_dir)
-# N_THREADS = '1'
-# environ['OMP_NUM_THREADS'] = N_THREADS
-# environ['OPENBLAS_NUM_THREADS'] = N_THREADS
-# environ['MKL_NUM_THREADS'] = N_THREADS
-# environ['VECLIB_MAXIMUM_THREADS'] = N_THREADS
-# environ['NUMEXPR_NUM_THREADS'] = N_THREADS
+N_THREADS = '1'
+environ['OMP_NUM_THREADS'] = N_THREADS
+environ['OPENBLAS_NUM_THREADS'] = N_THREADS
+environ['MKL_NUM_THREADS'] = N_THREADS
+environ['VECLIB_MAXIMUM_THREADS'] = N_THREADS
+environ['NUMEXPR_NUM_THREADS'] = N_THREADS
 from typing import Any
 from agents import NoiseAgent
 import gymnasium as gym 
@@ -392,8 +392,17 @@ class Market(gym.Env):
         # action space [m, l1, l2, l3, inactive]
         self.action_space = Box(low=-10, high=10, shape=(5,), seed=config['seed'], dtype=np.float32)
 
-        #
-        super().reset(seed=config['seed'])
+        # reset the environment 
+
+        ## 
+        # print(f'worker index is: {worker_index}')
+        worker_index = getattr(config, 'worker_index', 0)
+
+        # worker_index = 0
+        print(f"the seed is {config['seed']}")
+        print(f"the worker index is {worker_index}")
+        super().reset(seed=config['seed']+worker_index)
+
 
 
     def transition(self):

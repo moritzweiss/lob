@@ -1,78 +1,54 @@
 import numpy as np 
 import os 
-from os import environ
 import sys 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 sys.path.append(current_dir)
 from ray import tune
-# import ray
-# N_THREADS = '1'
-# environ['OMP_NUM_THREADS'] = N_THREADS
-# environ['OPENBLAS_NUM_THREADS'] = N_THREADS
-# environ['MKL_NUM_THREADS'] = N_THREADS
-# environ['VECLIB_MAXIMUM_THREADS'] = N_THREADS
-# environ['NUMEXPR_NUM_THREADS'] = N_THREADS
-from simulation.all_markets_simulation import Market, config
-from ray.rllib.algorithms.ppo import PPOConfig
+from simulation.all_markets_simulation import Market
 import pandas as pd 
-
-from ray.rllib.evaluate import run 
+import matplotlib.pyplot as plt
 import seaborn as sns
+from ray.rllib.algorithms.algorithm import Algorithm
 
-
-
-
-
-
-env_config = config.copy()
 
 # restore best agent 
 path = f'{parent_dir}/ray_results/40_noise'
 analysis = tune.ExperimentAnalysis(path, default_metric="episode_reward_mean", default_mode="max")
 best_trial = analysis.get_best_trial(metric="episode_reward_mean", mode="max", scope="last")
-config = analysis.get_best_config()
 path = analysis.get_best_checkpoint(trial=best_trial, mode="max", metric="episode_reward_mean")
-print(f'best checkpoint: {path}')
-config['num_workers'] = 1
-# config['num_workers'] = 1
-AC = PPOConfig()
-AC.update_from_dict(config)
-agent = AC.build()
-agent.restore(path)    
-eval_config = config['evaluation_config']['env_config']
+print(f'BEST CHECKPOINT: {path}')
+agent = Algorithm.from_checkpoint(path)
+env_config = agent.evaluation_config.env_config
+print(f"env config for evalutation config is {env_config}")
+print(f"exploration is set to {agent.evaluation_config.explore}")
 
-M = Market(config=env_config)
-
-# ray.init(local_mode=True)
 out = agent.evaluate()
-print(out)
-
-
 rewards = out['evaluation']['hist_stats']['episode_reward'] 
 print(f'mean: {np.mean(rewards)}')
 print(f'std: {np.std(rewards)}')
 
-import matplotlib.pyplot as plt
 # Convert rewards to DataFrame for easier plotting
 rewards_df = pd.DataFrame(rewards, columns=['Rewards'])
 # Create a boxplot
 plt.figure(figsize=(10, 6))
 sns.boxplot(data=rewards_df)
 plt.title('Boxplot of Rewards')
-plt.savefig('boxplot_rewards.pdf')
+plt.savefig('boxplot_rewards_0.pdf')
 
 
-# Create a histogram of rewards
+## Create a histogram of rewards
 plt.figure(figsize=(10, 6))
-bins = np.arange(-5, 5, 0.25)
+bins = np.arange(-10, 10, 0.25)
 sns.histplot(data=rewards_df, x='Rewards', bins=bins, kde=True)
 # sns.histplot(data=rewards_df, x='Rewards', bins=30, kde=True)
 plt.title('Histogram of Rewards')
-plt.savefig('histogram_rewards.pdf')
+plt.savefig('histogram_rewards_0.pdf')
 
 
+
+""" 
 n = int(1e3)
 # sample from market environment 
 results = {}
@@ -94,16 +70,24 @@ for n in range(n):
 
 results['rl_mean'] = np.mean(rewards)
 results['rl_std'] = np.std(rewards)
+print(results)
+ """
+""" 
+
+# print('#####')
+# print(results)
+# print(results)
 
 
 plt.figure(figsize=(10, 6))
 bins = np.arange(-5, 5, 0.25)
-rewards_df = pd.DataFrame(results['total_reward'], columns=['Rewards'])
-sns.histplot(data=rewards_df, x='Rewards', bins=bins, kde=True)
+# rewards = pd.DataFrame(rewards, index=[0])
+rewards = pd.DataFrame(rewards, columns=['Rewards'])
+sns.histplot(data=rewards, x='Rewards', bins=bins, kde=True)
 # sns.histplot(data=rewards_df, x='Rewards', bins=30, kde=True)
 plt.title('Histogram of Rewards')
 plt.savefig('histogram_rewards.pdf')
-print(results)
+rewards.to_csv('latest_results.csv') """
 
 
 # # sample from market environment 
