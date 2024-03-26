@@ -29,7 +29,7 @@ print(l)
 
 l[0]
 
-# envs = gym.vector.AsyncVectorEnv([lambda seed: Market(set_seed(seed)) for seed in [1,2]])
+envs = gym.vector.AsyncVectorEnv([lambda seed: Market(set_seed(seed)) for seed in [1,2]])
 
 # print(envs)
 # print(envs.single_action_space)
