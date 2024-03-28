@@ -396,12 +396,19 @@ class Market(gym.Env):
 
         ## 
         # print(f'worker index is: {worker_index}')
-        worker_index = getattr(config, 'worker_index', 0)
+        worker_index = getattr(config, 'worker_index', None)
 
-        # worker_index = 0
-        print(f"the seed is {config['seed']}")
-        print(f"the worker index is {worker_index}")
-        super().reset(seed=config['seed']+worker_index)
+        #
+        
+        # print(f"the seed is {config['seed']}")
+        if worker_index is not None:
+            super().reset(seed=config['seed']+worker_index)
+        else:
+            super().reset(seed=config['seed'])
+
+        
+        # print(f"the seed is {config['seed']}")
+        # print(f"the worker index is {worker_index}")
 
 
 
