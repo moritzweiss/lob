@@ -29,7 +29,7 @@ class NoiseAgent():
         rng: np.random number generator instance                                 
         """
 
-        self.damping_factor = damping_factor
+        self.damping_factor = damping_factor        
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
         
         self.imbalance_n_levels = imbalance_n_levels # anything related to this is commented out at the moment  
@@ -167,7 +167,7 @@ class NoiseAgent():
                 print(bid_volumes)
                 print(ask_volumes)
                 raise ValueError('imbalance is nan')
-            # imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
+            imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
             # imbalance = np.sign(imbalance)
             market_buy_intensity = self.market_intesity*(1+imbalance)
             market_sell_intensity = self.market_intesity*(1-imbalance)
