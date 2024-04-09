@@ -15,7 +15,7 @@ from typing import Any
 from agents import NoiseAgent
 import gymnasium as gym 
 from limit_order_book.limit_order_book import LimitOrderBook, MarketOrder, LimitOrder, Cancellation, CancellationByPriceVolume
-from limit_order_book.plotting import heat_map
+from limit_order_book.plotting import heat_map, plot_prices
 import matplotlib.pyplot as plt
 import numpy as np
 import warnings
@@ -590,7 +590,7 @@ config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time
 
 
 if __name__ == '__main__': 
-    config = {'seed':3, 'type':'strategic', 'execution_agent':'noise_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':1.0, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
+    config = {'seed':3, 'type':'strategic', 'execution_agent':'linear_sl_agent', 'terminal_time':int(2e3), 'volume':20, 'level':30, 'damping_factor':1.0, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
     print(config)
     M = Market(config)
     price_moves = []
@@ -598,15 +598,15 @@ if __name__ == '__main__':
         r = 0 
         print(f'episode {n}')        
         observation, _ = M.reset()
-        assert observation in M.observation_space
+        # assert observation in M.observation_space
         # print(f'initial observation: {observation}')x
         terminated = False 
         while not terminated:
             action = M.action_space.sample()
             action = np.array([0, 0, 0, 10, 0], dtype=np.float32)
             observation, reward, terminated, truncated, info = M.step(action)
-            print(observation[-2])
-            assert observation in M.observation_space
+            # print(observation[-2])
+            # assert observation in M.observation_space
             # print(f'observation: {observation}')
             # print(f'order distribution: {M.execution_agent.volume_per_level}')
             price_moves.append((M.lob.get_best_price('ask')-1000)/10) 
@@ -621,8 +621,11 @@ if __name__ == '__main__':
             print(f'total reward: {info["total_reward"]}')
             print(info)
             
-    # data, orders = M.lob.log_to_df()
-    # heat_map(orders, data, max_level=5, max_volume=50, scale=500)
+    data, orders = M.lob.log_to_df()
+    heat_map(orders, data, max_level=5, max_volume=40, scale=600)
+    # plot_prices(level2=data, trades=orders, marker_size=200)
+    plt.tight_layout()
+    plt.savefig('heat.pdf')
     # plt.show()
     # print(max(price_moves))
     # print(min(price_moves)) 
