@@ -52,18 +52,32 @@ def heat_map(trades, level2, max_level=30, scale=1000, max_volume=1000):
     # hard coded. find better logic for this. 
     # max_volume = 1000
 
-    plt.figure()
+    plt.figure(figsize=(10, 6))
 
-    plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-max_volume, vmax=max_volume)
+    plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-max_volume, vmax=max_volume, label='_nolegend_')
 
     plt.plot(time, level2.best_bid_price, '-', color='black', linewidth=3)
     plt.plot(time, level2.best_ask_price, '-', color='black', linewidth=3)
-    plt.colorbar()
+    cbar = plt.colorbar()
+    cbar.set_label('Volume', rotation=270, labelpad=15, fontsize=16)
 
     M = max(trades['size'])
     plt.scatter(time[ask_mask], level2.best_ask_price[ask_mask], color='black', marker='^', s= (scale/M)*trades['size'][ask_mask]) 
     plt.scatter(time[bid_mask], level2.best_bid_price[bid_mask], color='black', marker='v', s= (scale/M)*trades['size'][bid_mask])
+    
+    plt.xlim(0,2000)
+    plt.ylim(986,1006)
+    
+    # handles, labels = plt.gca().get_legend_handles_labels()
+    # Set x and y tick size
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.xlabel('Simulation Steps', fontsize=16)
+    plt.ylabel('Price', fontsize=16)
+    
 
+    plt.legend(['best bid price', 'best ask price', 'market buy', 'market sell'], prop={'size': 12}, loc='upper right')
+    
 
     return None  
 
@@ -75,7 +89,7 @@ def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
     book_shape_bid = np.nanmean(bid_volumes, axis=0)
     book_shape_ask = np.nanmean(ask_volumes, axis=0)    
     if symetric:
-        plt.figure()        
+        plt.figure(figsize=(10, 6))    
         shape = (book_shape_bid + book_shape_ask)/2
         plt.bar(range(0,-level,-1), shape, color='blue', label='bid')
         plt.bar(range(1,level+1,1), shape, color='red', label='ask')    
@@ -83,9 +97,11 @@ def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
         plt.figure()        
         plt.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
         plt.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
-    plt.legend(loc='upper right')
-    plt.xlabel('relative distance to mid price')
-    plt.ylabel('average volume')
+    plt.legend(loc='upper right', prop={'size': 18})
+    plt.xlabel('relative distance to mid price', fontsize=18)
+    plt.ylabel('average volume', fontsize=18)
+    plt.xticks(fontsize=14)
+
 
     # TODO: analyze average book shape
     return None 
@@ -110,15 +126,31 @@ def plot_prices(level2, trades, marker_size=50):
     ask_mask = (data.type == 'M') & (data.side == 'ask')
     max_volume = max(data['size'][data.type == 'M'])
 
-    plt.figure()
+    plt.figure(figsize=(10, 6))
 
-    plt.plot(data.index, data.best_bid_price, '--', color='grey')
-    plt.plot(data.index, data.best_ask_price, '--', color='grey')
+    plt.plot(data.index, data.best_bid_price, '-', color='black')
+    plt.plot(data.index, data.best_ask_price, '-', color='black')
     plt.plot(data.index, data.micro_price , '-', color='blue')
 
 
-    plt.scatter(data.index[bid_mask], data.best_bid_price[bid_mask], color='red', marker='v', s= marker_size*data['size'][bid_mask]/max_volume)
-    plt.scatter(data.index[ask_mask], data.best_ask_price[ask_mask], color='green', marker='^',s= marker_size*data['size'][ask_mask]/max_volume)
+    plt.scatter(data.index[bid_mask], data.best_bid_price[bid_mask], color='black', marker='v', s= marker_size*data['size'][bid_mask]/max_volume)
+    plt.scatter(data.index[ask_mask], data.best_ask_price[ask_mask], color='black', marker='^',s= marker_size*data['size'][ask_mask]/max_volume)
+
+    fontsize = 18
+    plt.xlim(0,2000)
+
+    plt.ylim(996,1006)
+    plt.legend(['best bid price', 'best ask price', 'micro price', 'market sell', 'market buy'], prop={'size': 16})
+    
+    plt.ylabel('Price', fontsize=fontsize)
+    plt.xlabel('Simulation Steps', fontsize=fontsize)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    
+    return None 
+
+
+
 
     
     return None 

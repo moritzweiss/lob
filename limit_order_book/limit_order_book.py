@@ -202,7 +202,7 @@ class LimitOrderBook:
         self.data.best_bid_prices.append(best_bid)
         self.data.best_ask_prices.append(best_ask)
         self.data.best_bid_volumes.append(self.volume_at_price('bid', best_bid))
-        self.data.best_ask_volumes.append(self.volume_at_price('ask', best_bid))
+        self.data.best_ask_volumes.append(self.volume_at_price('ask', best_ask))
         # if np.isnan(best_bid):
         #     self.data.best_bid_volumes.append(np.nan)
         # else:

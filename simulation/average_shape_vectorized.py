@@ -150,9 +150,9 @@ if __name__ == '__main__':
         print('bid shape - saved initial shape')
         print(bid_shape - env.noise_agent.initial_shape)
 
-        plt.figure()
-        plt.bar(np.arange(1000,1000-level,-1), bid_shape - env.noise_agent.initial_shape, color='b')
-        plt.bar(np.arange(1001,1001+level,1), ask_shape - env.noise_agent.initial_shape, color='r')
+        # plt.figure()
+        # plt.bar(np.arange(1000,1000-level,-1), bid_shape - env.noise_agent.initial_shape, color='b')
+        # plt.bar(np.arange(1001,1001+level,1), ask_shape - env.noise_agent.initial_shape, color='r')
         # plt.savefig('average_shape_difference.pdf')
         # plt.show()
 
@@ -163,11 +163,13 @@ if __name__ == '__main__':
 
         df, trades = env.lob.log_to_df()
 
-        plot_average_book_shape(bid_volumes=env.lob.data.bid_volumes, ask_volumes=env.lob.data.ask_volumes, level=30, symetric=False)
+        plot_average_book_shape(bid_volumes=env.lob.data.bid_volumes, ask_volumes=env.lob.data.ask_volumes, level=30, symetric=True)
+        plt.tight_layout()
+        plt.savefig('average_shape.pdf')
 
-        plot_prices(level2=df, trades=trades, marker_size=100)
+        # plot_prices(level2=df, trades=trades, marker_size=100)
 
-        heat_map(trades=trades, level2=df, max_level=5, scale=500, max_volume=50)
+        # heat_map(trades=trades, level2=df, max_level=5, scale=500, max_volume=50)
 
         plt.show()
 
