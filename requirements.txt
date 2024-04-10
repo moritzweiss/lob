@@ -1,0 +1,6 @@
+matplotlib
+gymnasium
+sortedcontainers
+pandas
+numpy
+jupyter
