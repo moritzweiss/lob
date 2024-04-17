@@ -263,6 +263,7 @@ class LimitOrderBook:
 
         # agent_id should be one of the registered agents 
         assert order.agent_id in self.registered_agents, "agent id not registered"
+        assert order.time >= self.time, "time must be greater than current time"
 
         if order.type == 'limit':
             msg = self.handle_limit_order(order)

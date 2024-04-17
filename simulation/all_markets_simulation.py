@@ -166,6 +166,7 @@ class Market(gym.Env):
             list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id]
         else:
             list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id, self.strategic_agent.agent_id]
+        # could implement a reset method for the limit order book
         self.lob = LimitOrderBook(level=self.noise_agent.level, list_of_agents = list_of_agents)
         orders = self.noise_agent.initialize(time=self.noise_step)
         reward, terminated = self.place_and_update(orders)
@@ -305,13 +306,14 @@ if __name__ == '__main__':
         if info["total_reward"] > 1:
             print(f'total reward: {info["total_reward"]}')
             print(info)
-            
+
+    print(info)            
     data, orders, market_orders = M.lob.log_to_df()
-    heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=600)
-    # # plot_prices(level2=data, trades=orders, marker_size=200)
-    plt.tight_layout()
-    plt.savefig('heat.pdf')
-    plt.show()
+    # heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=600)
+    # plot_prices(level2=data, trades=orders, marker_size=200)
+    # plt.tight_layout()
+    # plt.savefig('heat.pdf')
+    # plt.show()
     # print(max(price_moves))
     # print(min(price_moves)) 
 

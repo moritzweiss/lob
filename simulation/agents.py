@@ -254,8 +254,6 @@ class NoiseAgent():
 
 
 
-
-
 class ExecutionAgent():
     """
     Base class for execution agents.
@@ -264,9 +262,11 @@ class ExecutionAgent():
         - update positin takes a message and updates volumes, passive fille, market fills, and rewards  
         - reset function 
     """
-    def __init__(self, volume) -> None:
+    def __init__(self, volume, agent_id) -> None:
         self.initial_volume = volume
         self.frequency = 100
+        self.agent_id = agent_id
+        self.reset()
     
     def reset(self):
         self.volume = self.initial_volume
@@ -371,9 +371,8 @@ class ExecutionAgent():
 
 class MarketAgent(ExecutionAgent):
 
-    def __init__(self, volume) -> None:
-        super().__init__(volume)
-        self.agent_id = 'market_agent'
+    def __init__(self, volume, agent_id) -> None:
+        super().__init__(volume, 'market_agent')
         self.when_to_place = 0 
                     
     def generate_order(self, time, lob):
@@ -391,8 +390,7 @@ class MarketAgent(ExecutionAgent):
 class SubmitAndLeaveAgent(ExecutionAgent):
 
     def __init__(self, volume, terminal_time=100) -> None:
-        super().__init__(volume)
-        self.agent_id = 'sl_agent'
+        super().__init__(volume, 'sl_agent')
         self.terminal_time = terminal_time
         self.when_to_place = 0 
                         
@@ -447,8 +445,7 @@ class RLAgent(ExecutionAgent):
         - this agent takes in an action and then generates an order
     """
     def __init__(self, volume, terminal_time) -> None:
-        super().__init__(volume)
-        self.agent_id = 'rl_agent'  
+        super().__init__(volume, 'rl_agent')
         self.orders_within_range = set()
         self.when_to_place = 0
         self.terminal_time = terminal_time
