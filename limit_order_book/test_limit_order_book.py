@@ -454,5 +454,3 @@ if __name__ == '__main__':
     TLOB.test_modification()
     print('##########')
     TLOB.test_queue_position()
-    """
-    """
