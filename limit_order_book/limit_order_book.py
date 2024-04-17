@@ -16,13 +16,14 @@ class DynamicDict:
 
 # order types
 class Order:
-    def __init__(self, agent_id, type):
+    def __init__(self, agent_id, type, time):
         self.agent_id = agent_id
         self.type = type
+        self.time = time
 
 class LimitOrder(Order):
-    def __init__(self, agent_id, side, price, volume):
-        super().__init__(agent_id, 'limit')
+    def __init__(self, agent_id, side, price, volume, time):
+        super().__init__(agent_id, 'limit', time)
         assert side in ['bid', 'ask'], "side must be bid or ask"
         assert volume > 0, "volume must be positive"
         self.side = side
@@ -31,22 +32,22 @@ class LimitOrder(Order):
         self.order_id = None
         self.type = 'limit'
     def __repr__(self):
-        return f'LO(agent: {self.agent_id}, side: {self.side}, price: {self.price}, volume: {self.volume}, order_id: {self.order_id})'
+        return f'LO(agent: {self.agent_id}, side: {self.side}, price: {self.price}, volume: {self.volume}, order_id: {self.order_id}, time: {self.time})'
 
 class MarketOrder(Order):
-    def __init__(self, agent_id, side, volume):
-        super().__init__(agent_id, 'market')
+    def __init__(self, agent_id, side, volume, time):
+        super().__init__(agent_id, 'market', time)
         assert side in ['bid', 'ask'], "side must be bid or ask"
         assert volume > 0, "volume must be positive"
         self.side = side
         self.volume = volume
         self.type = 'market'
     def __repr__(self):
-        return f'MO(side: {self.side}, volume: {self.volume})'
+        return f'MO(side: {self.side}, volume: {self.volume}, time: {self.time})'
 
 class CancellationByPriceVolume(Order):
-    def __init__(self, agent_id, side, price, volume):
-        super().__init__(agent_id, 'cancellation_by_price_volume')
+    def __init__(self, agent_id, side, price, volume, time):
+        super().__init__(agent_id, 'cancellation_by_price_volume', time)
         assert side in ['bid', 'ask'], "side must be bid or ask"
         assert volume > 0, "volume must be positive"
         self.side = side
@@ -54,11 +55,11 @@ class CancellationByPriceVolume(Order):
         self.volume = volume
         self.type = 'cancellation_by_price_volume'
     def __repr__(self):
-        return f'CBPV(agent: {self.agent_id}, side: {self.side}, price: {self.price}, volume: {self.volume})'
+        return f'CBPV(agent: {self.agent_id}, side: {self.side}, price: {self.price}, volume: {self.volume}, time: {self.time})'
 
 class Cancellation(Order):
-    def __init__(self, agent_id, order_id):
-        super().__init__(agent_id, 'cancellation')
+    def __init__(self, agent_id, order_id, time):
+        super().__init__(agent_id, 'cancellation', time)
         assert order_id >= 0, "order id must be positive"
         self.order_id = order_id
         self.agent_id = agent_id
@@ -67,15 +68,15 @@ class Cancellation(Order):
         return f'Cancellation(agent_id={self.agent_id}, order_id={self.order_id})'
 
 class Modification(Order):
-    def __init__(self, agent_id, order_id, new_volume):
-        super().__init__(agent_id, 'modification')
+    def __init__(self, agent_id, order_id, new_volume, time):
+        super().__init__(agent_id, 'modification', time)
         assert order_id >= 0, "order id must be positive"
         assert new_volume > 0, "volume must be positive"
         self.order_id = order_id
         self.volume = new_volume
         self.type = 'modification'
     def __repr__(self):
-        return f'Modification(agent_id={self.agent_id}, order_id={self.order_id}, volume={self.new_volume})'
+        return f'Modification(agent_id={self.agent_id}, order_id={self.order_id}, volume={self.new_volume}, time={self.time})'
 
 # confirmation messages
 class ModificationConfirmation():
@@ -86,7 +87,7 @@ class ModificationConfirmation():
         self.old_volume = old_volume
         self.type = 'modification'
     def __repr__(self) -> str:
-        return f'ModificationConf(agent_id={self.order.agent_id}, order_id={self.order.order_id}, new_volume={self.new_volume}, old_volume={self.old_volume})'
+        return f'ModificationConf(agent_id={self.order.agent_id}, order_id={self.order.order_id}, new_volume={self.new_volume}, old_volume={self.old_volume}, time={self.order.time})'
 
 
 class LimitOrderFill():
@@ -164,6 +165,10 @@ class Data():
         self.best_ask_prices = []
         self.best_bid_volumes = []
         self.best_ask_volumes = []
+        # market trades 
+        self.market_buy = []
+        self.market_sell = []
+        self.time_stamps = []
     
 
 class LimitOrderBook:
@@ -181,6 +186,8 @@ class LimitOrderBook:
         self.data = Data(level=level)
         self.price_volume_map = {'bid': SortedDict(neg), 'ask': SortedDict()}
         self.only_volumes = only_volumes
+        self.log_everything = True
+        self.time = -np.inf 
         # self.only_shape = only_shape    
         # TODO: only shape options. where we only keep track of the shape. 
         # initialize state of the order book at step n = 0  
@@ -192,17 +199,53 @@ class LimitOrderBook:
         # level 2 data including empty levels
         bid_prices, bid_volumes = self.level2('bid')
         ask_prices, ask_volumes = self.level2('ask')
-        self.data.bid_prices.append(bid_prices)
-        self.data.ask_prices.append(ask_prices)
-        self.data.bid_volumes.append(bid_volumes)
-        self.data.ask_volumes.append(ask_volumes)
-        # best bid/ask prices and volumes for easy look up 
         best_bid = self.get_best_price('bid')
         best_ask = self.get_best_price('ask')
-        self.data.best_bid_prices.append(best_bid)
-        self.data.best_ask_prices.append(best_ask)
-        self.data.best_bid_volumes.append(self.volume_at_price('bid', best_bid))
-        self.data.best_ask_volumes.append(self.volume_at_price('ask', best_ask))
+        best_bid_volume = self.volume_at_price('bid', best_bid) 
+        best_ask_volume = self.volume_at_price('ask', best_ask)
+        if order.time > self.time:
+            self.data.time_stamps.append(order.time)
+            # set up new elements in lists 
+            self.data.bid_prices.append(bid_prices)
+            self.data.ask_prices.append(ask_prices)
+            self.data.bid_volumes.append(bid_volumes)
+            self.data.ask_volumes.append(ask_volumes)
+            # best bid/ask prices and volumes for easy look up 
+            self.data.best_bid_prices.append(best_bid)
+            self.data.best_ask_prices.append(best_ask)
+            self.data.best_bid_volumes.append(best_bid_volume)
+            self.data.best_ask_volumes.append(best_ask_volume)
+            # log market order sizes 
+            if order.type == 'market':
+                if order.side == 'bid':
+                    self.data.market_sell.append(order.volume)
+                    self.data.market_buy.append(0)
+                else:
+                    self.data.market_buy.append(order.volume)
+                    self.data.market_sell.append(0)
+            else:
+                self.data.market_buy.append(0)
+                self.data.market_sell.append(0)
+                
+        else: 
+            # update last element in lists
+            self.data.bid_prices[-1] = bid_prices
+            self.data.ask_prices[-1] = ask_prices
+            self.data.bid_volumes[-1] = bid_volumes
+            self.data.ask_volumes[-1] = ask_volumes
+            self.data.best_bid_prices[-1] = best_bid
+            self.data.best_ask_prices[-1] = best_ask
+            self.data.best_bid_volumes[-1] = best_bid_volume
+            self.data.best_ask_volumes[-1] = best_ask_volume
+            # log market order sizes 
+            if order.type == 'market':
+                if order.side == 'bid':
+                    self.data.market_sell[-1] += order.volume
+                else:
+                    self.data.market_buy[-1] += order.volume
+        
+        self.time = order.time
+
         # if np.isnan(best_bid):
         #     self.data.best_bid_volumes.append(np.nan)
         # else:
@@ -212,7 +255,7 @@ class LimitOrderBook:
         #     self.data.best_ask_volumes.append(self.price_volume_map['ask'][best_ask])
     
 
-    def process_order(self, order, log_order=True):
+    def process_order(self, order):
         """
         - an order is a dictionary with fields agent_id, type, side, price, volume, order_id
         - some of those fields are optional depending on the order type 
@@ -236,7 +279,7 @@ class LimitOrderBook:
 
         self.update_n += 1 
         # log shape of the book after transition 
-        if log_order:        
+        if self.log_everything:        
             self._logging(order)
         else:
             pass
@@ -428,6 +471,7 @@ class LimitOrderBook:
         order_list = []
 
         # go through the order ids in reverse order
+        # ToDo: change this to update the book directly 
         for cp_order_id in self.price_map[order.side][order.price][::-1]:
             if volume == 0:
                 break
@@ -436,11 +480,11 @@ class LimitOrderBook:
                 if volume < 0:
                     raise ValueError("cancellation volume is negative")
                 elif volume < cp_order.volume:
-                    order_list.append(Modification(agent_id=order.agent_id, order_id=cp_order_id, new_volume=cp_order.volume-volume)) 
+                    order_list.append(Modification(agent_id=order.agent_id, order_id=cp_order_id, new_volume=cp_order.volume-volume, time=order.time)) 
                     volume = 0.0
                     break
                 elif volume >= cp_order.volume:
-                    cancellation = Cancellation(order.agent_id, cp_order_id)                    
+                    cancellation = Cancellation(order.agent_id, cp_order_id, time=order.time)                    
                     order_list.append(cancellation)
                     volume = volume - cp_order.volume
             else:
@@ -450,12 +494,12 @@ class LimitOrderBook:
 
         return CancellationByPriceVolumeMessage(order=order, affected_orders=msg_list, filled_volume=order.volume-volume, price=order.price, partial_fill=volume>0)
 
-    def process_order_list(self, order_list):
+    def process_order_list(self, order_list, time_stamp):
         """
         - process a list of orders 
         - return a list of messages 
         """
-        return [self.process_order(order) for order in order_list]
+        return [self.process_order(order, time_stamp) for order in order_list]
 
 
     def modification(self, order):
@@ -557,6 +601,7 @@ class LimitOrderBook:
             data[f'bid_volume_{i}'] = bid_volumes[:,i]
             data[f'ask_price_{i}'] = ask_prices[:,i]
             data[f'ask_volume_{i}'] = ask_volumes[:,i]
+        data['time'] = self.data.time_stamps
         data = pd.DataFrame.from_dict(data)
         orders = {}
         order_type = ['M' if x.type == 'market' else 'L' if x.type == 'limit' else 'C' if x.type == 'cancellation' else 'PC' if x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
@@ -568,7 +613,15 @@ class LimitOrderBook:
         orders['size'] = order_size
         orders['price'] = order_price        
         orders = pd.DataFrame(orders)
-        return data, orders
+        # 
+        market_orders = {}
+        market_orders['buy'] = self.data.market_buy
+        market_orders['sell'] = self.data.market_sell
+        market_orders['time'] = self.data.time_stamps
+        market_orders = pd.DataFrame(market_orders)
+
+
+        return data, orders, market_orders
         
 
 

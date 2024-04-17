@@ -14,7 +14,7 @@ import pandas as pd
 # TODO: Wrap all the data into one data frame 
 
 
-def heat_map(trades, level2, max_level=30, scale=1000, max_volume=1000):
+def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1000):
     '''
     inputs:
         - trades: data frame with columns ['type', 'side', 'size', 'price']
@@ -33,21 +33,24 @@ def heat_map(trades, level2, max_level=30, scale=1000, max_volume=1000):
     ask_volumes = [f'ask_volume_{n}' for n in range(max_level)]
     ask_volumes = np.hstack(np.array(level2[ask_volumes]))
 
-    time = np.array(level2.index)
+    # comment this line to use use tick time: 1,2,3, and so on 
+    trades.time = event_times
+    time = np.array(trades.time)
+    # time = event_times
     N = len(time)
 
     prices = np.hstack([bid_prices, ask_prices])
     volumes = np.hstack([bid_volumes, ask_volumes])
-    time = np.arange(N)
+    # time = np.arange(N)
     extended_time = []
     for n in range(N):
         extended_time.extend(max_level*[time[n]])
     for n in range(N):
         extended_time.extend(max_level*[time[n]])
 
-    trades = trades.shift(-1)
-    bid_mask = (trades.side == 'bid') & (trades.type == 'M')
-    ask_mask = (trades.side == 'ask') & (trades.type == 'M')     
+    trades[['buy', 'sell']] = trades[['buy', 'sell']].shift(-1)
+    # bid_mask = (trades.side == 'bid') & (trades.type == 'M')
+    # ask_mask = (trades.side == 'ask') & (trades.type == 'M')     
     # max_volume = max(trades['size'][trades.type == 'M'])
     # hard coded. find better logic for this. 
     # max_volume = 1000
@@ -61,22 +64,26 @@ def heat_map(trades, level2, max_level=30, scale=1000, max_volume=1000):
     cbar = plt.colorbar()
     cbar.set_label('Volume', rotation=270, labelpad=15, fontsize=16)
 
-    M = max(trades['size'])
-    plt.scatter(time[ask_mask], level2.best_ask_price[ask_mask], color='black', marker='^', s= (scale/M)*trades['size'][ask_mask]) 
-    plt.scatter(time[bid_mask], level2.best_bid_price[bid_mask], color='black', marker='v', s= (scale/M)*trades['size'][bid_mask])
+    M = trades[['buy', 'sell']].max().max()
+    plt.scatter(trades[trades.buy>0].time.values, level2.best_ask_price[trades.buy>0], color='black', marker='^', s= (scale/M)*trades[trades.buy>0].buy.values) 
+    plt.scatter(trades[trades.sell>0].time.values, level2.best_bid_price[trades.sell>0], color='black', marker='v', s= (scale/M)*trades[trades.sell>0].sell.values)
     
-    plt.xlim(0,2000)
-    plt.ylim(986,1006)
+    plt.xlim(0,time[-1])
+    plt.ylim(993,1006)
     
     # handles, labels = plt.gca().get_legend_handles_labels()
     # Set x and y tick size
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
-    plt.xlabel('Simulation Steps', fontsize=16)
+    plt.xlabel('Time', fontsize=16)
     plt.ylabel('Price', fontsize=16)
     
 
-    plt.legend(['best bid price', 'best ask price', 'market buy', 'market sell'], prop={'size': 12}, loc='upper right')
+    lg = plt.legend(['best bid price', 'best ask price', 'market buy', 'market sell'], prop={'size': 10}, loc='upper right')
+    print(lg.legendHandles[2]._sizes)
+    # print(lg.legendHandles[0]._sizes)
+    lg.legendHandles[2]._sizes = [100]
+    lg.legendHandles[3]._sizes = [100]
     
 
     return None  

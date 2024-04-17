@@ -16,3 +16,4 @@ train/ray_results/
 ray_results/*
 histograms/* 
 rewards/* 
+.DS_Store

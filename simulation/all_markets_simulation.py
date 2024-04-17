@@ -12,405 +12,59 @@ environ['MKL_NUM_THREADS'] = N_THREADS
 environ['VECLIB_MAXIMUM_THREADS'] = N_THREADS
 environ['NUMEXPR_NUM_THREADS'] = N_THREADS
 from typing import Any
-from agents import NoiseAgent
+from agents import NoiseAgent, MarketAgent, SubmitAndLeaveAgent, LinearSubmitLeaveAgent, RLAgent, StrategicAgent
 import gymnasium as gym 
-from limit_order_book.limit_order_book import LimitOrderBook, MarketOrder, LimitOrder, Cancellation, CancellationByPriceVolume
 from limit_order_book.plotting import heat_map, plot_prices
 import matplotlib.pyplot as plt
+from limit_order_book.limit_order_book import LimitOrderBook
 import numpy as np
-import warnings
 from gymnasium.spaces import Box
 import os
 
-# TODO: test benchmark strategies. Test that rewards are as expected. Can just hand code an environemnt for this. 
+# TODO: test critical methods reward calculation and so on 
+# TODO: redo testing of limit order book 
 
-class DummyAgent():
-  """
-  TODO: can implement a dummy agent that does nothing for easier simulation  
-  """
-
-class ExecutionAgent():
-    """
-    Base class for execution agents.
-        - keeps track of volume, active_volume, cummulative_reward, passive_fills, market_fills
-        - active volume is the volume currently placed in the book 
-        - update positin takes a message and updates volumes, passive fille, market fills, and rewards  
-        - reset function 
-    """
-    def __init__(self, volume) -> None:
-        self.initial_volume = volume
-    
-    def reset(self):
-        self.volume = self.initial_volume
-        self.active_volume = 0
-        self.cummulative_reward = 0
-        self.reference_bid_price = None
-        self.market_buys = 0 
-        self.market_sells = 0
-        self.limit_buys = 0
-        self.limit_sells = 0
-
-    def get_reward(self, cash, volume):        
-        assert self.reference_bid_price is not None, 'reference bid price is not set'
-        return (cash - volume * self.reference_bid_price) / self.initial_volume
-    
-    def update_position_from_message_list(self, message_list):
-        rewards = [self.update_position(m) for m in message_list]
-        return sum(rewards)
-
-    def update_position(self, fill_message):
-        reward = 0 
-        assert self.active_volume >= 0
-        assert self.volume >= 0
-        assert self.limit_buys >= 0
-        assert self.limit_sells >= 0
-        assert self.market_buys >= 0
-        assert self.market_sells >= 0
-        assert self.active_volume <= self.volume
-        assert self.market_buys + self.market_sells + self.limit_buys + self.limit_sells <= self.initial_volume
-        if fill_message.type == 'modification':
-            # this agent doesnt modify orders
-            print('MODIFICATION but we do not update the position!')
-            pass
-        elif fill_message.type == 'cancellation_by_price_volume':
-            # Note: cancellation by price and volume could also return a list of cancellations and modifications
-            if fill_message.order.agent_id == self.agent_id:
-                self.active_volume -= fill_message.filled_volume
-            else:
-                pass
-        elif fill_message.type == 'limit':
-            if fill_message.agent_id == self.agent_id:
-                # this means the limit order was send into the book by the agent 
-                self.active_volume += fill_message.volume
-        elif fill_message.type == 'cancellation':
-            if fill_message.order.agent_id == self.agent_id:
-                self.active_volume -= fill_message.volume
-        elif fill_message.type == 'market':
-            # check for active market trades             
-            side = fill_message.order.side
-            if fill_message.order.agent_id == self.agent_id:
-                assert side == 'bid', 'this execution agent only sells'
-                # ask means buy --> volume increases, negative cash flow 
-                if side == 'ask':
-                    self.volume += fill_message.filled_volume
-                    self.market_buys += fill_message.filled_volume
-                    reward -= self.get_reward(fill_message.execution_price, fill_message.filled_volume)
-                    self.cummulative_reward -= reward
-                # bid means sell --> volume decreases, positive cash flow
-                elif side == 'bid':
-                    self.volume -= fill_message.filled_volume
-                    self.market_sells += fill_message.filled_volume
-                    reward += self.get_reward(fill_message.execution_price, fill_message.filled_volume)
-                    self.cummulative_reward += reward
-            # check for passive limit order fills 
-            if self.agent_id in fill_message.passive_fills:
-                assert side == 'ask', 'this execution agent only sells'
-                cash = 0
-                volume = 0 
-                for m in fill_message.passive_fills[self.agent_id]:
-                    volume += m.filled_volume
-                    cash += m.filled_volume * m.order.price 
-                # market side is ask, market buy --> limit sell 
-                if side == 'ask':
-                    self.active_volume -= volume
-                    self.volume -= volume
-                    self.limit_sells += volume
-                    reward += self.get_reward(cash, volume)
-                    self.cummulative_reward += reward
-                # market side is bid, market sell --> limit buy
-                elif side == 'bid':
-                    self.active_volume -= volume
-                    self.volume += volume
-                    self.limit_buys += volume
-                    reward -= self.get_reward(cash, volume)
-                    self.cummulative_reward -= reward
-            return reward
-        else: 
-            raise ValueError(f'Unknown message type {fill_message.type}')
-        return 0 
-
-class MarketAgent(ExecutionAgent):
-
-    def __init__(self, volume) -> None:
-        super().__init__(volume)
-        self.agent_id = 'market_agent'
-        self.when_to_place = 0 
-                    
-    def generate_order(self, time, lob):
-        assert self.active_volume >= 0 
-        assert self.volume >= 0
-        if time == self.when_to_place:
-            self.reference_bid_price = lob.get_best_price('bid')
-            return MarketOrder(self.agent_id, side='bid', volume=self.volume)
-        else:
-            return None
-    
-    def get_observation(self, time, lob):
-        return None 
-
-class SubmitAndLeaveAgent(ExecutionAgent):
-
-    def __init__(self, volume, terminal_time=100) -> None:
-        super().__init__(volume)
-        self.agent_id = 'sl_agent'
-        self.terminal_time = terminal_time
-        self.when_to_place = 0 
-                        
-    def generate_order(self, time, lob):
-        assert self.volume >= 0
-        assert self.active_volume >= 0 
-        assert time <= self.terminal_time        
-        if time == self.when_to_place:
-            self.reference_bid_price = lob.get_best_price('bid')
-            limit_price = lob.get_best_price('bid')+1
-            # print(f'reference bid price is {self.reference_bid_price}')
-            # print(f'placing limit order at {limit_price}')            
-            return LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume)
-        else:
-            return None
-    
-    def get_observation(self, time, lob):
-        return None 
-
-class LinearSubmitLeaveAgent(ExecutionAgent):
-
-    def __init__(self, volume, terminal_time=1000, frequency=100) -> None:
-        super().__init__(volume)
-        self.agent_id = 'linear_sl_agent'
-        self.terminal_time = terminal_time
-        self.when_to_place = 0 
-        self.frequency = frequency
-        steps = int(terminal_time/frequency)
-        assert volume % steps == 0 or volume < steps
-        assert self.when_to_place < self.terminal_time
-        if volume >= steps:
-            self.volume_slice = int(self.initial_volume/steps)
-            assert self.volume_slice * steps == volume
-        return None 
-                        
-    def generate_order(self, time, lob):
-        assert self.volume >= 0
-        assert self.active_volume >= 0 
-        if time == self.when_to_place:
-            self.reference_bid_price = lob.get_best_price('bid')
-        if time % self.frequency == 0 and time < self.terminal_time:
-            limit_price = lob.get_best_price('bid')+1
-            return LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice)
-        else:
-            return None
-    
-    def get_observation(self, time, lob):
-        return None 
-
-class RLAgent(ExecutionAgent):
-    """
-        - this agent takes in an action and then generates an order
-    """
-    def __init__(self, volume, terminal_time) -> None:
-        super().__init__(volume)
-        self.agent_id = 'rl_agent'  
-        self.orders_within_range = set()
-        self.when_to_place = 0
-        self.terminal_time = terminal_time
-        
-    
-    def generate_order(self, time, lob, action):
-        """
-        - generate list of orders from an action
-        - return the list of orders
-        """
-        if time == self.when_to_place:
-            self.reference_bid_price = lob.get_best_price('bid') 
-
-        best_bid = lob.get_best_price('bid')
-
-        action = np.exp(action) / np.sum(np.exp(action), axis=0)
-        # print(action.round(2))
-
-        order_list = []
-        
-        # keep track of total cancelled volume 
-        cancelled_volume = 0
-        order_list = []
-        # self.orders_within_range is set in the get_observation function
-        # cancel orders that are not on levels >= l4 
-        orders_to_cancel = lob.order_map_by_agent[self.agent_id].difference(self.orders_within_range)
-        for order_id in orders_to_cancel:
-            order_list.append(Cancellation(self.agent_id, order_id))
-            cancelled_volume += lob.order_map[order_id].volume
-        
-        assert cancelled_volume == self.volume_per_level[-1]
-        
-        # target volumes 
-        target_volumes = []
-        available_volume = self.volume 
-        for l in range(len(action)):
-            # [market,l1 ,l2, ,l3, inactive]
-            # np.round rounds values in [0, 0.5] to 0, and values in [0.5, 1] to 1 
-            volume_on_level = min(np.round(action[l]*self.volume).astype(int), available_volume)
-            available_volume -= volume_on_level
-            target_volumes.append(volume_on_level) 
-        target_volumes[-1] += available_volume
-        
-        # current volumes contains levels l1, l2, l3, >=l4
-        current_volumes = self.volume_per_level
-        current_volumes.extend([self.volume - self.active_volume + cancelled_volume]) 
-        current_volumes.insert(0, 0)
-
-        l = 0 
-        m = 0 
-        for level in range(4): 
-            # 0, 1, 2, 3
-            if level == 0:
-                if target_volumes[level] > 0:
-                    order_list.append(MarketOrder(self.agent_id, 'bid', target_volumes[level]))
-                    m = target_volumes[level]
-            else:
-                diff = target_volumes[level] - current_volumes[level]
-                limit_price = best_bid+level
-                if diff > 0:
-                    order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, diff))
-                    l += diff
-                elif diff < 0:
-                    order_list.insert(0, CancellationByPriceVolume(agent_id=self.agent_id, side='ask', price=limit_price, volume=-diff))
-                    cancelled_volume += -diff
-                else:
-                    pass
-
-        # new limit and market order must match the cancelled volume
-        assert l >= 0
-        assert m >= 0
-        assert self.volume >= self.active_volume >= cancelled_volume >= 0
-        free_budget = cancelled_volume + (self.volume - self.active_volume)
-        assert 0 <= free_budget <= self.volume
-        assert 0 <= l + m <= free_budget, 'l + m must be less than or equal to the free budget'
-        # target volumes[-1] = inactive = (volume - active volume) + cancelled - l - m 
-        assert target_volumes[-1] == (self.volume - self.active_volume) + cancelled_volume - l - m 
-        # TODO: create check to test validity of the order list
-        return order_list 
-
-    
-    def get_observation(self, time, lob):        
-        best_bid = lob.get_best_price(side='bid')
-        volume_per_level = []
-        orders_within_range = set()
-        #TODO: remove the hard coding of levels here 
-        for level in range(1, 4):
-            # 1,2,3
-            orders_on_level = 0
-            if best_bid+level in lob.price_map['ask']:
-                for order_id in lob.price_map['ask'][best_bid+level]:
-                    if lob.order_map[order_id].agent_id == self.agent_id:                        
-                        orders_on_level += lob.order_map[order_id].volume
-                        orders_within_range.add(order_id)
-                volume_per_level.append(orders_on_level)
-            else:
-                volume_per_level.append(0)
-        # append volumes on levels >=4
-        volume_per_level.append(self.active_volume-sum(volume_per_level))
-        assert sum(volume_per_level) == self.active_volume
-        # append volumes that are inactive 
-        # volume_per_level.append(self.volume-self.active_volume)
-        assert sum(volume_per_level) == self.active_volume
-        self.orders_within_range = orders_within_range
-        self.volume_per_level = volume_per_level
-        assert sum(self.volume_per_level) <= self.volume
-        # 
-        if time == 0:
-            bid_move = 0
-        else:
-            bid_move = (best_bid - self.reference_bid_price)/10
-        spread = (lob.get_best_price('ask') - best_bid)/10
-        _, bid_v = lob.level2('bid')
-        _, ask_v = lob.level2('ask')
-
-        # probably a good idea to make this unit less. 
-        # should also take imbalances     
-        bid_v = bid_v[:3]/np.array([5,10,20])
-        ask_v = ask_v[:3]/np.array([5,10,20])   
-
-        volume_per_level = np.array(volume_per_level, dtype=np.float32)/self.initial_volume
-
-        out = np.array([time/self.terminal_time, self.volume/self.initial_volume, self.active_volume/self.initial_volume, (self.volume-self.active_volume)/self.initial_volume, bid_move, spread], dtype=np.float32)
-
-        out = np.concatenate([out, volume_per_level, bid_v, ask_v], dtype=np.float32)
-
-        # add 4th level imbalance
-        if np.sum(bid_v[:6]) + np.sum(ask_v[:6]) == 0:
-            # print('zero bid/ask volumes')
-            # print(bid_v[:4])
-            # print(ask_v[:4])            
-            imbalance = 0
-        else:
-            # print('zero bid/ask volumes')
-            # print(bid_v[:4])
-            # print(ask_v[:4])       
-            imbalance = (np.sum(bid_v[:6]) - np.sum(ask_v[:6]))/(np.sum(bid_v[:6]) + np.sum(ask_v[:6]))
-        imbalance = np.array([imbalance], dtype=np.float32)
-        # out = np.append(out, imbalance, dtype=np.float32)
-        out = np.concatenate([out, imbalance])
-        # print(f'imbalance: {imbalance}')
-
-        # 
-        return out 
-            
-class StrategicAgent():
-    """
-    - just sends limit and market orders at some frequency
-    - we do not keep track of the agents position 
-    """
-    def __init__(self, frequency, market_volume, limit_volume, rng) -> None:
-        self.frequency = frequency
-        self.market_order_volume = market_volume
-        self.limit_order_volume = limit_volume
-        self.agent_id = 'strategic_agent'
-        self.rng = rng
-        self.direction = None 
-        return None 
-    
-    def generate_order(self, time, lob):        
-        if time % self.frequency == 0: 
-            if self.direction == 'sell':                
-                limit_price = lob.get_best_price('bid')+1
-                order_list = []
-                order_list.append(MarketOrder(self.agent_id, 'bid', self.market_order_volume))
-                order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, self.limit_order_volume))                        
-                return order_list
-            elif self.direction == 'buy':
-                limit_price = lob.get_best_price('ask')-1
-                order_list = []
-                order_list.append(MarketOrder(self.agent_id, 'ask', self.market_order_volume))
-                order_list.append(LimitOrder(self.agent_id, 'bid', limit_price, self.limit_order_volume))                        
-                return order_list
-            else:
-                raise ValueError(f'direction must be either buy or sell, got {self.direction}')
-        else: 
-            return None 
-        
-    def reset(self):
-        self.direction = self.rng.choice(['buy', 'sell'])
-        return None
 
 class Market(gym.Env):
-    def __init__(self, config):                
-                #  seed, type='noise', execution_agent='market', terminal_time=int(1e3), volume=20, level=30, damping_factor=0.5, market_volume=2, limit_volume=5, frequency=50) -> None:
-        """ 
-            - seed: controls seeding for the noise agent. other agents are deterministic 
-            - type: noise, flow, strategic controls the type of market environment
-            - benchmark_agent: None, market, linear_sl, sl, controls the type of benchmark agent (set to None without benchmark)
-            - terminal_time: the time at which the environment terminates
-            - market, limit volume and frequency are parameters for the strategic agent
-            - damping factor is the exponential damping factor for the noise agent 
-            - volume: how much volume the agent trades 
+    """ 
+    Attributes:
+        - env_type: noise, flow, strategic, controls the type of environment
+        - execution_agent: market_agent, sl_agent, linear_sl_agent, rl_agent, controls the type of execution agent
+        - terminal_time: when to stop the environment
+        - benchmark_agent: None, market, linear_sl, sl, controls the type of benchmark agent (set to None without benchmark)
+        - terminal_time: the time at which the environment terminates
+        - action space
+        - observation space 
+        - noise_step: counts the steps of the noise agent (we use this as event time) 
+        - physical_time: counts the physical time based on exponential distribution 
+        - lob: limit order book instance 
+        - drift: drift of the strategic agent. we add this manually to make training easier
+        
+    TODO : 
+    - damping factor should move into a config file once it is fixed 
+    - level and terminal time should be moved into a config file 
+    - market, limit, frequency, should be moved into a config file 
+    - we should have one config option. like config=1 sets the options for all the other environments 
+        
+    """ 
 
-            TODO : 
-            - damping factor should move into a config file once it is fixed 
-            - level and terminal time should be moved into a config file 
-            - market, limit, frequency, should be moved into a config file 
-            - we should have one config option. like config=1 sets the options for all the other environments 
-            
-        """ 
-        # initialize execution agent 
+    def __init__(self, config):                
+        """
+        Arguments:
+            - config: dictionary with the following keys
+                - seed: seed for the environment 
+                - type: noise, flow, strategic
+                - execution_agent: market_agent, sl_agent, linear_sl_agent, rl_agent
+                - terminal_time: when to stop the environment
+                - volume: volume of the agent 
+                - level: number of levels in the order book 
+                - damping_factor: how much the order book is damped 
+                - market_volume: volume of market orders of the strategic agent 
+                - limit_volume: volume of limit order of the strategic agent                
+                - frequency: frequency of the strategic agent 
+                - offset: offset of the strategic agent
+        TODO: seperate into two agents. one market and one limit agent. 
+        """
         if config['execution_agent'] == 'market_agent':
             self.execution_agent = MarketAgent(volume=config['volume'])
         elif config['execution_agent'] == 'sl_agent':
@@ -436,11 +90,11 @@ class Market(gym.Env):
 
         assert config['damping_factor'] > 0, 'damping factor must be > 0'
 
-        self.noise_agent = NoiseAgent(level=config['level'], rng=np.random.default_rng(config['seed']), imbalance_reaction=imbalance, initial_shape_file=f'{parent_dir}/data_small_queue.npz', config_n=1, damping_factor=config['damping_factor'])
+        self.noise_agent = NoiseAgent(level=config['level'], rng=np.random.default_rng(config['seed']), imbalance_reaction=imbalance, initial_shape_file=f'{parent_dir}/data_new_param.npz', config_n=1, damping_factor=config['damping_factor'])
         
         # setting strategic agent
         if config['type'] == 'strategic':
-            self.strategic_agent = StrategicAgent(frequency=50, market_volume=2, limit_volume=5, rng=np.random.default_rng(config['seed']))
+            self.strategic_agent = StrategicAgent(frequency=20, market_volume=1, limit_volume=4, rng=np.random.default_rng(config['seed']), offset=19)
         else:
             self.strategic_agent = None
 
@@ -472,29 +126,33 @@ class Market(gym.Env):
             super().reset(seed=config['seed']+worker_index)
         else:
             super().reset(seed=config['seed'])
-
         
-        # print(f"the seed is {config['seed']}")
-        # print(f"the worker index is {worker_index}")
+        self.physical_time = None  
+        self.noise_step = None 
+        self.lob = None 
+        self.drift = None
 
+        # whether to use physical time or event time to update the order book 
+        # we can also use this to turn of eponential distribution sampling (maybe this will make the environent faster)
+        self.use_physical_time = True 
 
-
-    def transition(self):
-        reward = 0
-        # noise trader trades at every time step        
-        order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
-        reward += self.place_and_update_position(order)
-        # strategic agent trades at some frquency, e.g. every 50 time steps
-        if self.strategic_agent is not None:
-            order_list = self.strategic_agent.generate_order(self.time, lob=self.lob)
-            reward += self.place_and_update_position(order_list)
-        self.time += 1
-        assert self.execution_agent.volume >= 0
-        return reward
 
     def reset(self, seed=None, options={}):
+        """
+        - reset physical time and noise step 
+        - reset agents
+        - initialize the order book, then 
+        - run 50 transitions
+
+        Returns:
+            - observation (observation depens on the execution agent, sl agent just returns None, rl agent returns full observation)
+            - {}: empty dictionary
+        """
         super().reset(seed=seed)
-        # reset strategic agent 
+        self.event_times = [0]
+        self.physical_time = 0  
+        self.noise_step = -50 
+        # reset agents, register, initialize 
         if self.strategic_agent is not None:
             self.strategic_agent.reset()
             if self.strategic_agent.direction == 'sell':
@@ -503,94 +161,119 @@ class Market(gym.Env):
                 self.drift = 1
             else:
                 raise ValueError(f'Unknown direction {self.strategic_agent.direction}')
-        # reset execution agent, this will set the direction for the execution agent 
         self.execution_agent.reset()
-        # time of the simulation 
-        self.time = -50
-        # initialize the order book and register agents 
         if self.strategic_agent is None:
             list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id]
         else:
             list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id, self.strategic_agent.agent_id]
         self.lob = LimitOrderBook(level=self.noise_agent.level, list_of_agents = list_of_agents)
-        # fill the book with initial limit orders 
-        orders = self.noise_agent.initialize()
-        self.lob.process_order_list(orders)        
-        # run 50 transitions 
+        orders = self.noise_agent.initialize(time=self.noise_step)
+        reward, terminated = self.place_and_update(orders)
+        assert terminated == False
+        assert reward == 0
+        # run transitions
         for _ in range(50):
-            out = self.transition()
-        # return the observation
+            self.single_transition()
         observation = self._get_observation()
         return observation, {}
     
-    def place_and_update_position(self, order):
-        if order is None:
-            return 0
-        if type(order) == list:
-            msg_list = [self.lob.process_order(o) for o in order]
-            reward = self.execution_agent.update_position_from_message_list(msg_list)
+
+    def step(self, action=None):
+        """
+        run the environemnt until the next observation happens 
+
+        Arguments:
+            - action: if rl agent exists, action is a numpy array, otherwise it is None
+        Returns:
+            - observation: observation depends on the execution agent, sl agent just returns None, rl agent returns full observation
+            - total_reward: total reward from 0 to 100 
+            - terminated: True if the environment is terminated
+            - truncated: True if the environment is truncated
+            - info dict: output depends on whether the state is terminal or not 
+        """
+        assert self.noise_step >= 0
+        total_reward = 0
+        for _ in range(100):
+            reward, terminated = self.single_transition(action)
+            total_reward += reward
+        if terminated: 
+            assert self.execution_agent.volume == 0, 'agent should have zero volume'
+            observation = self._get_observation()
+            return observation, total_reward, True, False, self.final_info()
+        elif self.noise_step < self.terminal_time:
+            observation = self._get_observation()
+            return observation, total_reward, False, False, {}
         else:
-            msg = self.lob.process_order(order)
-            reward = self.execution_agent.update_position(msg)
-        return reward
+            raise ValueError(f'noise step is {self.noise_step} and terminal time is {self.terminal_time}')
+    
+
+    def single_transition(self, action=None):
+        total_reward = 0
+        # orders by execution agent 
+        if self.noise_step % self.execution_agent.frequency == 0 and self.noise_step >= 0:
+            if self.execution_agent.agent_id == 'rl_agent':
+                order = self.execution_agent.generate_order(self.noise_step, self.lob, action)
+            else:
+                order = self.execution_agent.generate_order(self.noise_step, self.lob)        
+            reward, terminated = self.place_and_update(order)
+            total_reward += reward
+        # noise agent 
+        order, waiting_time = self.noise_agent.sample_order(self.lob, self.noise_step)
+        self.physical_time += waiting_time
+        self.event_times.append(self.physical_time)
+        reward, terminated = self.place_and_update([order])
+        total_reward += reward
+        # strategic agent
+        if self.noise_step%self.strategic_agent.frequency == self.strategic_agent.offset:
+            order_list = self.strategic_agent.generate_order(self.lob, self.noise_step)
+            reward, terminated = self.place_and_update(order_list)
+            total_reward += reward
+        # log orders here              
+        self.noise_step += 1 
+        assert self.noise_step <= self.terminal_time, 'noise step should not exceed terminal time'
+        if self.noise_step == self.terminal_time and not terminated:
+            order_list = self.execution_agent.sell_remaining_position(self.lob, self.noise_step)
+            reward, terminated = self.place_and_update(order_list)
+            assert terminated
+            assert self.execution_agent.active_volume == 0
+            assert self.execution_agent.volume == 0, 'agent should have zero volume at terminal time'
+            total_reward += reward
+        # log orders here         
+        return total_reward, terminated
+
+
+    def place_and_update(self, order):
+        if order is None:
+            return 0, False
+        else:
+            msg_list = [self.lob.process_order(o) for o in order]
+            return self.execution_agent.update_position_from_message_list(msg_list)
+
 
     def _get_observation(self):
         if self.execution_agent.agent_id == 'rl_agent':
             if self.env_type == 'strategic':
                 assert self.drift is not None
-                observation = np.append(self.execution_agent.get_observation(self.time, self.lob), self.drift).astype(np.float32)
+                observation = np.append(self.execution_agent.get_observation(self.noise_step, self.lob), self.drift).astype(np.float32)
             else:
-                observation = self.execution_agent.get_observation(self.time, self.lob)       
+                observation = self.execution_agent.get_observation(self.noise_step, self.lob)       
         else:
-            observation = self.execution_agent.get_observation(self.time, self.lob)
+            observation = self.execution_agent.get_observation(self.noise_step, self.lob)
         return observation
-    
-    def step(self, action=None):
-        reward = 0 
-        # orders by execution agent
-        if self.execution_agent.agent_id == 'rl_agent':
-            order = self.execution_agent.generate_order(self.time, self.lob, action)
-        else:
-            order = self.execution_agent.generate_order(self.time, self.lob)        
-        # process those orders: the function places the orders in the book and updates the agents position
-        reward += self.place_and_update_position(order)
-        # agent can reach terminal condition by sending market orders 
-        if self.execution_agent.volume == 0:                
-            observation = self._get_observation()
-            return observation, reward, True, False, self.final_info() 
-        # go through 100 steps by the noise traders and strategic agent
-        for _ in range(100):
-            reward += self.transition()
-            if self.execution_agent.volume == 0:
-                observation = self._get_observation()
-                return observation, reward, True, False, self.final_info()
-        # handle terminal conditions 
-        if self.time == self.terminal_time:
-            order_list = []
-            for order_id in self.lob.order_map_by_agent[self.execution_agent.agent_id]:
-                order_list.append(Cancellation(agent_id=self.execution_agent.agent_id, order_id=order_id))
-            order_list.append(MarketOrder(agent_id=self.execution_agent.agent_id, side='bid', volume=self.execution_agent.volume))
-            reward += self.place_and_update_position(order_list)
-            observation = self._get_observation()
-            assert self.execution_agent.active_volume == 0
-            assert self.execution_agent.volume == 0, 'agent should have zero volume at terminal time'
-            return observation, reward, True, False, self.final_info()
-        observation = self._get_observation()
-        return observation, reward, False, False, {}
     
     def final_info(self):
         bid = self.lob.get_best_price('bid')
         ask = self.lob.get_best_price('ask')
-        return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.time, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 
+        return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.noise_step, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 
                 'initial_bid': self.execution_agent.reference_bid_price, 'limit_sell':self.execution_agent.limit_sells, 'market_sell': self.execution_agent.market_sells, 
                 'limit_buy': self.execution_agent.limit_buys, 'market_buy': self.execution_agent.market_buys, 'best_bid': bid, 'best_ask': ask}
 
 
-config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':2, 'limit_volume':5, 'frequency':50}  
+config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':1, 'limit_volume':4, 'frequency':20, 'offset':-1}  
 
 
 if __name__ == '__main__': 
-    config = {'seed':3, 'type':'strategic', 'execution_agent':'linear_sl_agent', 'terminal_time':int(2e3), 'volume':20, 'level':30, 'damping_factor':1.0, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
+    config = {'seed':7, 'type':'strategic', 'execution_agent':'linear_sl_agent', 'terminal_time':int(2e2), 'volume':20, 'level':30, 'damping_factor':1.0, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
     print(config)
     M = Market(config)
     price_moves = []
@@ -605,6 +288,8 @@ if __name__ == '__main__':
             action = M.action_space.sample()
             action = np.array([0, 0, 0, 10, 0], dtype=np.float32)
             observation, reward, terminated, truncated, info = M.step(action)
+            # print(M.noise_step)
+            # print(M.physical_time)
             # print(observation[-2])
             # assert observation in M.observation_space
             # print(f'observation: {observation}')
@@ -621,12 +306,12 @@ if __name__ == '__main__':
             print(f'total reward: {info["total_reward"]}')
             print(info)
             
-    data, orders = M.lob.log_to_df()
-    heat_map(orders, data, max_level=5, max_volume=40, scale=600)
-    # plot_prices(level2=data, trades=orders, marker_size=200)
+    data, orders, market_orders = M.lob.log_to_df()
+    heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=600)
+    # # plot_prices(level2=data, trades=orders, marker_size=200)
     plt.tight_layout()
     plt.savefig('heat.pdf')
-    # plt.show()
+    plt.show()
     # print(max(price_moves))
     # print(min(price_moves)) 
 
