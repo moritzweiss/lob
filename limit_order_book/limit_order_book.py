@@ -495,12 +495,12 @@ class LimitOrderBook:
 
         return CancellationByPriceVolumeMessage(order=order, affected_orders=msg_list, filled_volume=order.volume-volume, price=order.price, partial_fill=volume>0)
 
-    def process_order_list(self, order_list, time_stamp):
+    def process_order_list(self, order_list):
         """
         - process a list of orders 
         - return a list of messages 
         """
-        return [self.process_order(order, time_stamp) for order in order_list]
+        return [self.process_order(order) for order in order_list]
 
 
     def modification(self, order):
@@ -589,6 +589,41 @@ class LimitOrderBook:
             queue_position += self.order_map[id].volume
         raise ValueError('order_id not found on this price level')
     
+    def clear_orders(self, level):
+        """
+        - cancel all orders beyond a certain level 
+        - don't send confirmation messages
+        """
+        best_bid = self.get_best_price('bid')   
+        best_ask = self.get_best_price('ask')
+
+        # update prices volume map 
+        for price in self.price_volume_map['bid']:
+            if price < best_bid - level:
+                self.price_volume_map['bid'].pop(price)
+        for price in self.price_volume_map['ask']:
+            if price > best_ask + level:
+                self.price_volume_map['ask'].pop(price)
+
+        if self.only_volumes:
+            return None
+
+        for price in self.price_map['bid']:
+            if price < best_bid - level:
+                for order_id in self.price_map['bid'][price]:
+                    self.order_map_by_agent[self.order_map[order_id].agent_id].remove(order_id)
+                    self.order_map.pop(order_id)
+                self.price_map['bid'].pop(price)
+        for price in self.price_map['ask']:
+            if price > best_ask + level:
+                for order_id in self.price_map['ask'][price]:
+                    self.order_map_by_agent[self.order_map[order_id].agent_id].remove(order_id)
+                    self.order_map.pop(order_id)
+                self.price_map['ask'].pop(price)
+        
+        return
+
+
     def log_to_df(self):
         time = np.arange(0, self.update_n)        
         data = {'best_bid_price': self.data.best_bid_prices, 'best_ask_price': self.data.best_ask_prices, 'best_bid_volume': self.data.best_bid_volumes, 'best_ask_volume': self.data.best_ask_volumes}

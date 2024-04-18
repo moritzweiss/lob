@@ -92,9 +92,16 @@ def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
     """
     - bid/ask_volumes: list of np arrays, [v1, v2, v3, ...]
     """ 
+
     level = len(bid_volumes[0]) 
+    # T = len(bid_volumes)
+    # book_shape_bid = np.nanmean(bid_volumes[-int(T/2):][::100], axis=0)
+    # book_shape_ask = np.nanmean(ask_volumes[-int(T/2):][::100], axis=0)
+
     book_shape_bid = np.nanmean(bid_volumes, axis=0)
-    book_shape_ask = np.nanmean(ask_volumes, axis=0)    
+    book_shape_ask = np.nanmean(ask_volumes, axis=0)
+
+
     if symetric:
         plt.figure(figsize=(10, 6))    
         shape = (book_shape_bid + book_shape_ask)/2
@@ -108,6 +115,7 @@ def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
     plt.xlabel('relative distance to mid price', fontsize=18)
     plt.ylabel('average volume', fontsize=18)
     plt.xticks(fontsize=14)
+    plt.savefig('average_shape.pdf')
 
 
     # TODO: analyze average book shape

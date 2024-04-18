@@ -10,7 +10,7 @@ from config.config import config
 
 
 class NoiseAgent(): 
-    def __init__(self, rng, config_n, initial_shape_file, damping_factor=0.0, imbalance_reaction=False, imbalance_n_levels=4, level=30):
+    def __init__(self, rng, config_n,initial_shape_file=None, initial_shape=50, damping_factor=0.0, imbalance_reaction=False, imbalance_n_levels=4, level=30):
         """"    
         Parameters:
         ----
@@ -65,8 +65,11 @@ class NoiseAgent():
 
 
         # initial shape of the order book
-        shape = np.load(initial_shape_file) 
-        self.initial_shape = np.clip(np.rint(np.mean([shape['bid_shape'], shape['ask_shape']], axis=0)), 1, np.inf)      
+        if initial_shape_file is None:
+            self.initial_shape = np.array([initial_shape]*self.initial_level)            
+        else:
+            shape = np.load(initial_shape_file) 
+            self.initial_shape = np.clip(np.rint(np.mean([shape['bid_shape'], shape['ask_shape']], axis=0)), 1, np.inf)      
         # self.initial_shape = self.initial_level*[50]
 
         self.agent_id = 'noise_agent'
@@ -226,7 +229,7 @@ class NoiseAgent():
                             
         return order, waiting_time 
 
-    def cancel_far_out_orders(self, lob):        
+    def cancel_far_out_orders(self, lob, time):        
         # ToDo: Could add this as a function to the order book (as an order type)
         order_list = []
         for price in lob.price_map['bid'].keys():
@@ -234,7 +237,7 @@ class NoiseAgent():
                 for order_id in lob.price_map['bid'][price]:
                     # this is repetitive 
                     if lob.order_map[order_id].agent_id == self.agent_id:
-                        order = Cancellation(agent_id=self.agent_id, order_id=order_id)
+                        order = Cancellation(agent_id=self.agent_id, order_id=order_id, time=time)
                         order_list.append(order)
         # try to establish boundary conditions 
         # order = LimitOrder(agent_id=self.agent_id, side='bid', price=lob.get_best_price('ask') - self.level - 1, volume=self.initial_shape[0])
@@ -245,7 +248,7 @@ class NoiseAgent():
                 for order_id in lob.price_map['ask'][price]:
                     # also repetitive 
                     if lob.order_map[order_id].agent_id == self.agent_id:
-                        order = Cancellation(agent_id=self.agent_id, order_id=order_id)
+                        order = Cancellation(agent_id=self.agent_id, order_id=order_id, time=time)
                         order_list.append(order)                                
         # order = LimitOrder(agent_id=self.agent_id, side='ask', price=lob.get_best_price('bid') + self.level + 1, volume=self.initial_shape[0])
         # order_list.append(order)

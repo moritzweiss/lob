@@ -19,9 +19,9 @@ pd.set_option('display.max_rows', 500)
 
 class Market(gym.Env):    
     def __init__(self, seed=0, terminal_time=int(1e3), level=30):
+        super().reset(seed=seed)
         self.level = 30 
         self.terminal_time = terminal_time
-        super().reset(seed=seed)
         self.noise_agent = NoiseAgent(level=30, rng=self.np_random, initial_shape_file='data_small_queue.npz', config_n=1, imbalance_reaction=True, imbalance_n_levels=4, damping_factor=0.5)
         self.observation_space = Box(low=-1, high=1, shape=(1,), dtype=np.float32)
         self.action_space = Box(low=-1, high=1, shape=(1,), dtype=np.float32)

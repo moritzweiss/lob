@@ -5,8 +5,7 @@ from multiprocessing import Pool
 import numpy as np
 import itertools
 import time 
-import ray
-
+# import ray
 # config['execution_agent'] = 'sl_agent'
 # config['execution_agent'] = 'linear_sl_agent'
 config['execution_agent'] = 'sl_agent'
@@ -24,8 +23,6 @@ def _make_env(seed):
     return lambda: Market(config=cf)
 
 print('#####')
-
-
 # @ray.remote
 def rollout(seed, num_episodes, strategy = 'sl_agent', env_type='flow', damping_factor=0.5, volume=50):
     c = config.copy()
@@ -50,7 +47,7 @@ def rollout(seed, num_episodes, strategy = 'sl_agent', env_type='flow', damping_
 
 
 def mp_rollout(n_samples, n_envs, strategy, env_type, damping_factor, volume):
-    samples_per_env = int(n_samples/n_envs)
+    samples_per_env = int(n_samples/n_envs) 
     # print(f'starting {n_envs} workers')
     # print(f'{samples_per_env} per worker')
     with Pool(n_envs) as p:
