@@ -98,23 +98,26 @@ def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
     # book_shape_bid = np.nanmean(bid_volumes[-int(T/2):][::100], axis=0)
     # book_shape_ask = np.nanmean(ask_volumes[-int(T/2):][::100], axis=0)
 
-    book_shape_bid = np.nanmean(bid_volumes, axis=0)
-    book_shape_ask = np.nanmean(ask_volumes, axis=0)
+    book_shape_bid = np.nanmean(bid_volumes, axis=0)[:level]
+    book_shape_ask = np.nanmean(ask_volumes, axis=0)[:level]
 
 
+    plt.figure(figsize=(10, 6))     
+    plt.grid(zorder=0)
     if symetric:
-        plt.figure(figsize=(10, 6))    
         shape = (book_shape_bid + book_shape_ask)/2
         plt.bar(range(0,-level,-1), shape, color='blue', label='bid')
         plt.bar(range(1,level+1,1), shape, color='red', label='ask')    
     else:
-        plt.figure()        
         plt.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
         plt.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
     plt.legend(loc='upper right', prop={'size': 18})
     plt.xlabel('relative distance to mid price', fontsize=18)
     plt.ylabel('average volume', fontsize=18)
     plt.xticks(fontsize=14)
+    plt.xlim(-31,31)
+    plt.yticks(range(0, 21, 5), fontsize=14)
+    plt.xticks(range(-30, 31, 10), fontsize=14)
     plt.savefig('average_shape.pdf')
 
 

@@ -10,7 +10,7 @@ from config.config import config
 
 
 class NoiseAgent(): 
-    def __init__(self, rng, config_n,initial_shape_file=None, initial_shape=50, damping_factor=0.0, imbalance_reaction=False, imbalance_n_levels=4, level=30):
+    def __init__(self, rng, config_n,initial_shape_file=None, initial_shape=50, damping_factor=0.0, imbalance_reaction=False, imbalance_n_levels=4, level=30, unit_volume=False):
         """"    
         Parameters:
         ----
@@ -30,6 +30,7 @@ class NoiseAgent():
         rng: np.random number generator instance                                 
         """
 
+        self.unit_volume = unit_volume
         self.damping_factor = damping_factor        
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
         
@@ -92,6 +93,8 @@ class NoiseAgent():
         return orders
 
     def volume(self, action):
+        if self.unit_volume:
+            return 1        
         assert self.config['distribution'] in ['log_normal', 'half_normal_plus1'], 'distribution not implemented'
         # ToDo: initialize distribution at the beginning 
         if self.distribution == 'log_normal':

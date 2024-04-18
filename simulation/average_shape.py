@@ -17,8 +17,8 @@ from multiprocessing import Pool
 import itertools
 
 
-def average_shape(n_time_steps=1, rng=default_rng(0)):
-    NA = NoiseAgent(level=30, rng=rng, initial_shape=50, config_n=1, imbalance_reaction=True, damping_factor=0.5)
+def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50):
+    NA = NoiseAgent(level=30, rng=rng, initial_shape=initial_shape, config_n=1, imbalance_reaction=True, damping_factor=0.5, unit_volume=False)
     LOB = LimitOrderBook(list_of_agents=[NA.agent_id], level=30, only_volumes=True)
     orders = NA.initialize(time=0)
     LOB.process_order_list(orders)
@@ -31,10 +31,10 @@ def average_shape(n_time_steps=1, rng=default_rng(0)):
     ask_volumes = LOB.data.ask_volumes[-int(T/2):][::100]     
     return bid_volumes, ask_volumes
 
-def mp_rollout(n_samples, n_cpus):
+def mp_rollout(n_samples, n_cpus, initial_shape):
     samples_per_cpu = int(n_samples/n_cpus)
     with Pool(n_cpus) as p:
-        out = p.starmap(average_shape, [(samples_per_cpu, default_rng(seed)) for seed in range(n_cpus)])    
+        out = p.starmap(average_shape, [(samples_per_cpu, default_rng(seed), initial_shape) for seed in range(n_cpus)])    
     bid_volumes, ask_volumes = zip(*out)
     bid_volumes = list(itertools.chain.from_iterable(bid_volumes))
     ask_volumes = list(itertools.chain.from_iterable(ask_volumes))
@@ -42,11 +42,11 @@ def mp_rollout(n_samples, n_cpus):
 
 if __name__ == '__main__':
     start_time = timeit.default_timer()
-    bidv, askv = mp_rollout(int(2e6), 50)
+    bidv, askv = mp_rollout(int(2e6), 50, 1)
     # bidv, askv = average_shape(n_time_steps=int(1e5), rng=default_rng(0))
     end_time = timeit.default_timer()
     print(f"Execution time: {end_time - start_time} seconds")
-    plot_average_book_shape(bidv, askv)
+    plot_average_book_shape(bidv, askv, level=10)
     # plt.show()
 
 
