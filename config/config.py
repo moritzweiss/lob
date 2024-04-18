@@ -54,6 +54,7 @@ config1['intensities'] = {}
 config1['intensities']['market'] = market_intensity
 config1['intensities']['limit'] = limit_intensities
 config1['intensities']['cancellation'] = 1e-1*cancel_intensities
+# config1['intensities']['cancellation'] = 1e-2*cancel_intensities
 
 
 

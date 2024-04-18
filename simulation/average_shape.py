@@ -18,7 +18,7 @@ import itertools
 
 
 def average_shape(n_time_steps=1, rng=default_rng(0)):
-    NA = NoiseAgent(level=30, rng=rng, initial_shape=50, config_n=0, imbalance_reaction=True, damping_factor=0.5)
+    NA = NoiseAgent(level=30, rng=rng, initial_shape=50, config_n=1, imbalance_reaction=True, damping_factor=0.5)
     LOB = LimitOrderBook(list_of_agents=[NA.agent_id], level=30, only_volumes=True)
     orders = NA.initialize(time=0)
     LOB.process_order_list(orders)
@@ -42,8 +42,8 @@ def mp_rollout(n_samples, n_cpus):
 
 if __name__ == '__main__':
     start_time = timeit.default_timer()
-    # bidv, askv = mp_rollout(1000, 10)
-    bidv, askv = average_shape(n_time_steps=1000, rng=default_rng(0))
+    bidv, askv = mp_rollout(int(2e6), 50)
+    # bidv, askv = average_shape(n_time_steps=int(1e5), rng=default_rng(0))
     end_time = timeit.default_timer()
     print(f"Execution time: {end_time - start_time} seconds")
     plot_average_book_shape(bidv, askv)

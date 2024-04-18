@@ -195,6 +195,7 @@ class NoiseAgent():
         probability = np.array([market_sell_intensity, market_buy_intensity, limit_intensity, limit_intensity, bid_cancel_intensity, ask_cancel_intensity])        
         waiting_time = self.np_random.exponential(np.sum(probability))
         # waiting_time = 1 
+        # waiting_time = 1 
         # time += waiting_time
 
         probability = probability/np.sum(probability)
