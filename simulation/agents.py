@@ -154,27 +154,11 @@ class NoiseAgent():
         assert np.all(bid_volumes >= 0), 'All entries of bid volumes must be >= 0'
         assert np.all(ask_volumes >= 0), 'All entries of ask volumes must be >= 0'
 
-        # n_levels = len(bid_volumes)
-        
+        # n_levels = len(bid_volumes)        
+        ask_cancel_intensity = bid_cancel_intensity = self.cancel_intensities
+        bid_limit_intensities = ask_limit_intensities = self.limit_intensities
 
-        ask_cancel_intensity = np.sum(self.cancel_intensities*ask_volumes)
-        bid_cancel_intensity = np.sum(self.cancel_intensities*bid_volumes)
-        limit_intensity = np.sum(self.limit_intensities)
-
-
-        # check if bid and ask volumes are zero at the same time 
         if self.imbalance_reaction:
-            # if (np.sum(bid_volumes) == 0) and (np.sum(ask_volumes) == 0):
-            #     imbalance = 0
-            # else:
-                # imbalance = ((bid_volumes[0]) - ask_volumes[0])/(bid_volumes[0] + ask_volumes[0])
-                # imbalance = (np.sum(bid_volumes[:self.imbalance_n_levels]) - np.sum(ask_volumes[:self.imbalance_n_levels]))/(np.sum(bid_volumes[:self.imbalance_n_levels]) + np.sum(ask_volumes[:self.imbalance_n_levels]))    
-                # Compute imbalance with exponential damping
-            # weights = np.exp(-np.arange(self.imbalance_n_levels))
-            # c = 0.5
-            # c = 1.0
-            # c = 0.0  
-            # weights = np.exp(-self.damping_factor*np.arange(len(bid_volumes)))
             weighted_bid_volumes = np.sum(self.damping_weights * bid_volumes)
             weighted_ask_volumes = np.sum(self.damping_weights * ask_volumes)
             if (weighted_bid_volumes + weighted_ask_volumes) == 0:
@@ -186,16 +170,32 @@ class NoiseAgent():
                 print(bid_volumes)
                 print(ask_volumes)
                 raise ValueError('imbalance is nan')
-            imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
+            # possible adjustments of the imbalance: 
+            # imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
             # imbalance = np.sign(imbalance)
             market_buy_intensity = self.market_intesity*(1+imbalance)
             market_sell_intensity = self.market_intesity*(1-imbalance)
+            # adjust cancellation intensities
+            # if imbalance = 1, price goes up, cancel limit sell orders, dont cancel limit buy orders, limit buy is on the bid side 
+            # if imbalance = -1, price goes down, cancel limit buy orders, dont cancel limit sell orders, limit sell is on the ask side 
+            # bid_cancel_intensity = ask_cancel_intensity = self.cancel_intensities
+            bid_cancel_intensity[0] = bid_cancel_intensity[0]*(1+imbalance)
+            ask_cancel_intensity[0] = ask_cancel_intensity[0]*(1-imbalance)
+            # adjust limit order intensities
+            # I = -1, price down, cancel limit buy orders (bid side), dont cancel limit sell orders (ask side)
+            # bid_limit_intensities = ask_limit_intensities = self.limit_intensities
+            bid_limit_intensities[0] = bid_limit_intensities[0]*(1+imbalance)
+            # I = 1, price up, cancel limit sell orders (ask side), dont cancel limit buy orders (bid side)
+            ask_limit_intensities[0] = ask_limit_intensities[0]*(1-imbalance)
         else:
             market_buy_intensity = self.market_intesity
             market_sell_intensity = self.market_intesity
 
 
-        probability = np.array([market_sell_intensity, market_buy_intensity, limit_intensity, limit_intensity, bid_cancel_intensity, ask_cancel_intensity])        
+
+        bid_cancel_intensity = bid_cancel_intensity*bid_volumes 
+        ask_cancel_intensity = ask_cancel_intensity*ask_volumes
+        probability = np.array([market_sell_intensity, market_buy_intensity, np.sum(bid_limit_intensities), np.sum(ask_limit_intensities), np.sum(bid_cancel_intensity), np.sum(ask_cancel_intensity)])        
         waiting_time = self.np_random.exponential(np.sum(probability))
         # waiting_time = 1 
         # waiting_time = 1 
@@ -204,16 +204,17 @@ class NoiseAgent():
         probability = probability/np.sum(probability)
         action, side = self.np_random.choice([('market', 'bid'), ('market', 'ask'), ('limit', 'bid'), ('limit', 'ask'), ('cancellation', 'bid'), ('cancellation', 'ask')], p=probability)
 
-
-
         volume = self.volume(action)
 
         if action == 'limit': 
-            probability = self.limit_intensities/np.sum(self.limit_intensities)
-            level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
+            # draw level 
             if side == 'bid': 
+                probability = bid_limit_intensities/np.sum(bid_limit_intensities)
+                level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_ask_price - level
             else: 
+                probability = ask_limit_intensities/np.sum(ask_limit_intensities)
+                level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
             order = LimitOrder(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time) 
 
@@ -222,11 +223,11 @@ class NoiseAgent():
         
         elif action == 'cancellation':
             if side == 'bid':
-                probability = self.cancel_intensities*bid_volumes/np.sum(self.cancel_intensities*bid_volumes)
+                probability = bid_cancel_intensity/np.sum(bid_cancel_intensity)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_ask_price - level
             elif side == 'ask':
-                probability = self.cancel_intensities*ask_volumes/np.sum(self.cancel_intensities*ask_volumes)
+                probability = ask_cancel_intensity/np.sum(ask_cancel_intensity)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
             order = CancellationByPriceVolume(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time)
