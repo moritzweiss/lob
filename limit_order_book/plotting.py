@@ -88,7 +88,7 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
 
     return None  
 
-def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
+def plot_average_book_shape(bid_volumes, ask_volumes, ax, level=3, symetric=False, file_name='shape', title='average shape'):
     """
     - bid/ask_volumes: list of np arrays, [v1, v2, v3, ...]
     """ 
@@ -102,23 +102,32 @@ def plot_average_book_shape(bid_volumes, ask_volumes, level=3, symetric=False):
     book_shape_ask = np.nanmean(ask_volumes, axis=0)[:level]
 
 
-    plt.figure(figsize=(10, 6))     
-    plt.grid(zorder=0)
+    # plt.figure(figsize=(10, 6))     
+    ax.grid(zorder=0)
     if symetric:
         shape = (book_shape_bid + book_shape_ask)/2
-        plt.bar(range(0,-level,-1), shape, color='blue', label='bid')
-        plt.bar(range(1,level+1,1), shape, color='red', label='ask')    
+        ax.bar(range(0,-level,-1), shape, color='blue', label='bid')
+        ax.bar(range(1,level+1,1), shape, color='red', label='ask')    
     else:
-        plt.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
-        plt.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
-    plt.legend(loc='upper right', prop={'size': 18})
-    plt.xlabel('relative distance to mid price', fontsize=18)
-    plt.ylabel('average volume', fontsize=18)
-    plt.xticks(fontsize=14)
-    plt.xlim(-31,31)
-    plt.yticks(range(0, 21, 5), fontsize=14)
-    plt.xticks(range(-30, 31, 10), fontsize=14)
-    plt.savefig('average_shape.pdf')
+        ax.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
+        ax.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
+    # ax.legend(loc='upper right', prop={'size': 18})
+    ax.legend(loc='upper right')
+    # ax.set_xlabel('relative distance to mid price')
+    # ax.set_xlabel('relative distance to mid price', fontsize=18)
+    ax.set_ylabel('volume')
+    # ax.set_ylabel('average volume', fontsize=18)
+    # ax.tick_params(axis='x', labelsize=14)
+    # ax.tick_params(axis='y', labelsize=14)
+    ax.set_xlim(-31,31)
+    ax.set_yticks(range(0, 21, 5))
+    ax.set_xticks(range(-30, 31, 10))
+    ax.set_title(title)
+    # ax.set_title(title, fontsize=18)
+    # ax.set_title(title, fontsize=18)
+    # ax.tight_layout()
+    # ax.savefig(f'{file_name}.pdf')
+    return None
 
 
     # TODO: analyze average book shape
