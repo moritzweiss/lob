@@ -45,13 +45,6 @@ noise_agent_config['level'] = 30
 noise_agent_config['imbalance_factor'] = 3
 # 
 noise_agent_config['rng'] = np.random.default_rng(0)
-
-
-
-
-
-
-
-
-
-
+# 
+noise_agent_config['initial_bid'] = 1000
+noise_agent_config['initial_ask'] = 1001
