@@ -5,40 +5,44 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 import numpy as np
 from limit_order_book.limit_order_book import LimitOrder, MarketOrder, CancellationByPriceVolume, Cancellation
-from config.config import config
-
+from config.config import noise_agent_config
 
 
 class NoiseAgent(): 
-    def __init__(self, rng, config_n,initial_shape_file=None, initial_shape=50, damping_factor=0.0, imbalance_reaction=False, imbalance_n_levels=4, level=30, unit_volume=False):
+    def __init__(self, rng, 
+                 level,
+                 limit_intensities, market_intensity, cancel_intensities,
+                 initial_shape_file, 
+                 initial_shape, 
+                 volume_distribution,
+                 market_mean, market_std,
+                 cancel_mean, cancel_std,
+                 limit_mean, limit_std,
+                 volume_min, volume_max,
+                 unit_volume,
+                 damping_factor, imbalance_reaction, imbalance_factor                  
+                 ):
         """"    
         Parameters:
         ----
         initial_shape_file: str
             stationary shape of the order book to start from 
+            if this is None, use the integer stored in initial_shape 
         level: int 
             number of levels the noise agents placed its orders. also the number of levels to initialize the order book.
             numbers of orders outside this range are cancelled
+        limit_intensities, market_intensity, cancel_intensities: np.array of intensities        
         imbalance_reaction: bool 
             if True, the agent reacts to the imbalance of the order book 
-        config_n: int 
-            number of the configuration to use, 0: is from paper, 1: is config for small tick stocks 
-            the configs contain intensities for limit orders, market orders and cancellations, as well as volume parameters
-        number of levels to compute the imbalance: int 
-            number of levels to compute the imbalance. if this is =1, imbalance is just computed from top of the book
-            the parameters does not have any effect if imbalance_reaction is False  
+        damping_factor: damping factor for the imbalance computation 
+        volume_distribtion: half normal or log normal 
         rng: np.random number generator instance                                 
         """
 
-        self.unit_volume = unit_volume
         self.damping_factor = damping_factor        
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
-        
-        self.imbalance_n_levels = imbalance_n_levels # anything related to this is commented out at the moment  
-
-        self.config = config[config_n]
-
         self.imbalance_reaction = imbalance_reaction
+        self.imbalance_factor = imbalance_factor
 
         self.np_random = rng 
         self.level = level 
@@ -47,31 +51,28 @@ class NoiseAgent():
         self.initial_bid = 1000
         self.initial_ask = 1001
                 
-        # load intensities 
-        limit_intensities = self.config['intensities']['limit']
-        market_intensity = self.config['intensities']['market']
-        cancel_intensities = self.config['intensities']['cancellation']
-
         assert self.level >= 10, 'level must be at least 10'
         self.limit_intensities = np.pad(limit_intensities, (0,self.level-len(limit_intensities)), 'constant', constant_values=(0))
         self.cancel_intensities = np.pad(cancel_intensities, (0,self.level-len(cancel_intensities)), 'constant', constant_values=(0))
         self.market_intesity = market_intensity
 
-        self.distribution = self.config['distribution']
-        self.market_volume_parameters = self.config['volumes']['market']
-        self.limit_volume_parameters = self.config['volumes']['limit']
-        self.cancel_volume_parameters = self.config['volumes']['cancellation']
-        self.volume_min = self.config['volumes']['clipping']['min']
-        self.volume_max = self.config['volumes']['clipping']['max']
+        # volume distribution. could seperate this out into another class 
+        self.unit_volume = unit_volume
+        self.volume_distribution = volume_distribution
+        self.market_mean = market_mean
+        self.market_std = market_std
+        self.limit_mean = limit_mean
+        self.limit_std = limit_std
+        self.cancel_mean = cancel_mean
+        self.cancel_std = cancel_std
+        self.volume_min = volume_min
+        self.volume_max = volume_max
 
-
-        # initial shape of the order book
         if initial_shape_file is None:
             self.initial_shape = np.array([initial_shape]*self.initial_level)            
         else:
             shape = np.load(initial_shape_file) 
             self.initial_shape = np.clip(np.rint(np.mean([shape['bid_shape'], shape['ask_shape']], axis=0)), 1, np.inf)      
-        # self.initial_shape = self.initial_level*[50]
 
         self.agent_id = 'noise_agent'
 
@@ -85,6 +86,8 @@ class NoiseAgent():
         # ToDo: initial bid and ask as variable 
         orders = [] 
         for idx, price in enumerate(np.arange(self.initial_bid, self.initial_bid-self.initial_level, -1)):
+            # Note: in principle this is not correct of the spread of the initial shape is > 1 
+            # leave as is for now. the spread is mostly = 1 
             order = LimitOrder(agent_id=self.agent_id, side='bid', price=price, volume=self.initial_shape[idx], time=time)
             orders.append(order)
         for idx, price in enumerate(np.arange(self.initial_ask, self.initial_ask+self.initial_level, 1)): 
@@ -95,9 +98,9 @@ class NoiseAgent():
     def volume(self, action):
         if self.unit_volume:
             return 1        
-        assert self.config['distribution'] in ['log_normal', 'half_normal_plus1'], 'distribution not implemented'
+        assert self.volume_distribution in ['log_normal', 'half_normal'], 'distribution not implemented'
         # ToDo: initialize distribution at the beginning 
-        if self.distribution == 'log_normal':
+        if self.volume_distribution == 'log_normal':
             if action == 'limit':
                 volume = self.np_random.lognormal(self.limit_volume_parameters['mean'], self.limit_volume_parameters['std'])   
             elif action == 'market':
@@ -108,11 +111,11 @@ class NoiseAgent():
 
         else: 
             if action == 'limit':
-                volume = self.np_random.normal(self.limit_volume_parameters['mean'], self.limit_volume_parameters['std'])   
+                volume = self.np_random.normal(self.limit_mean, self.limit_std)   
             elif action == 'market':
-                volume = self.np_random.normal(self.market_volume_parameters['mean'], self.market_volume_parameters['std'])
+                volume = self.np_random.normal(self.market_mean, self.market_std)
             elif action == 'cancellation':
-                volume = self.np_random.normal(self.cancel_volume_parameters['mean'], self.cancel_volume_parameters['std'])
+                volume = self.np_random.normal(self.cancel_mean, self.cancel_std)
             volume = np.rint(np.clip(1+np.abs(volume), self.volume_min, self.volume_max))
 
         return volume
@@ -140,27 +143,34 @@ class NoiseAgent():
         if np.isnan(best_bid_price):
             if np.isnan(best_ask_price):
                 # bid and ask are nan 
-                order = LimitOrder(agent_id=self.agent_id, side='bid', price=self.initial_bid, volume=self.initial_shape[0])
+                order = LimitOrder(agent_id=self.agent_id, side='bid', price=self.initial_bid, volume=self.initial_shape[0], time=time)
             else:
                 # bid is nan, ask is not nan
-                order = LimitOrder(agent_id=self.agent_id, side='bid', price=best_ask_price-1, volume=self.initial_shape[0])
-            return order
+                order = LimitOrder(agent_id=self.agent_id, side='bid', price=best_ask_price-1, volume=self.initial_shape[0], time=time)
+            return order, 0
         if np.isnan(best_ask_price):
-            # bid is not nan, ask is nan
-            order = LimitOrder(agent_id=self.agent_id, side='ask', price=best_bid_price+1, volume=self.initial_shape[0])
-            return order
+            # ask is nan, bid is not nan 
+            order = LimitOrder(agent_id=self.agent_id, side='ask', price=best_bid_price+1, volume=self.initial_shape[0], time=time)
+            return order, 0
 
         assert len(bid_volumes) == len(ask_volumes), 'bid and ask volumes must have the same length'
         assert np.all(bid_volumes >= 0), 'All entries of bid volumes must be >= 0'
         assert np.all(ask_volumes >= 0), 'All entries of ask volumes must be >= 0'
 
-        # n_levels = len(bid_volumes)        
-        ask_cancel_intensity = bid_cancel_intensity = self.cancel_intensities
-        bid_limit_intensities = ask_limit_intensities = self.limit_intensities
-
+        bid_cancel_intensity = self.cancel_intensities*bid_volumes 
+        ask_cancel_intensity = self.cancel_intensities*ask_volumes
         if self.imbalance_reaction:
-            weighted_bid_volumes = np.sum(self.damping_weights * bid_volumes)
-            weighted_ask_volumes = np.sum(self.damping_weights * ask_volumes)
+            L = len(bid_volumes)
+            if np.sum(bid_volumes) == 0:
+                weighted_bid_volumes = 0
+            else:
+                idx = np.nonzero(bid_volumes)[0][0]
+                weighted_bid_volumes = np.sum(self.damping_weights[:L-idx]*bid_volumes[idx:])
+            if np.sum(ask_volumes) == 0:
+                weighted_ask_volumes = 0
+            else:
+                idx = np.nonzero(ask_volumes)[0][0]
+                weighted_ask_volumes = np.sum(self.damping_weights[:L-idx]*ask_volumes[idx:])
             if (weighted_bid_volumes + weighted_ask_volumes) == 0:
                 imbalance = 0
             else:
@@ -170,44 +180,62 @@ class NoiseAgent():
                 print(bid_volumes)
                 print(ask_volumes)
                 raise ValueError('imbalance is nan')
+            assert -1 <= imbalance <= 1, 'imbalance must be in [-1, 1]'
+            pos = self.imbalance_factor*max(0, imbalance)
+            neg = self.imbalance_factor*max(0, -imbalance)
             # possible adjustments of the imbalance: 
             # imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
             # imbalance = np.sign(imbalance)
-            market_buy_intensity = self.market_intesity*(1+imbalance)
-            market_sell_intensity = self.market_intesity*(1-imbalance)
+            # if I = 1, price goes up --> more market buys
+            # market_buy_intensity = self.market_intesity*(1+imbalance)
+            # market_sell_intensity = self.market_intesity*(1-imbalance)
+            market_buy_intensity = self.market_intesity*(1+pos)
+            market_sell_intensity = self.market_intesity*(1+neg)
             # adjust cancellation intensities
-            # if imbalance = 1, price goes up, cancel limit sell orders, dont cancel limit buy orders, limit buy is on the bid side 
-            # if imbalance = -1, price goes down, cancel limit buy orders, dont cancel limit sell orders, limit sell is on the ask side 
-            # bid_cancel_intensity = ask_cancel_intensity = self.cancel_intensities
-            bid_cancel_intensity[0] = bid_cancel_intensity[0]*(1+imbalance)
-            ask_cancel_intensity[0] = ask_cancel_intensity[0]*(1-imbalance)
+            # if imbalance = 1, price goes up --> cancel limit sell orders (ask)
+            # adjust cancellation intensities
+            # if imbalance = 1, price goes up --> cancel limit buy orders (bid)
+            #
+            bid_cancel_intensity = bid_cancel_intensity*(1+neg)
+            ask_cancel_intensity = ask_cancel_intensity*(1+pos)
+            # n = 30
+            # bid_cancel_intensity[:n] = bid_cancel_intensity[:n]*(1-imbalance)
+            # ask_cancel_intensity[:n] = ask_cancel_intensity[:n]*(1+imbalance)
+            # bid_cancel_intensity[:n] = bid_cancel_intensity[:n]*(1-imbalance*self.damping_weights[:n])
+            # ask_cancel_intensity[:n] = ask_cancel_intensity[:n]*(1+imbalance*self.damping_weights[:n])
+            # weights = np.exp(-0.1*np.arange(L))
+            # bid_cancel_intensity = bid_cancel_intensity*(1-imbalance*(2*weights-1))
+            # ask_cancel_intensity = ask_cancel_intensity*(1+imbalance*(2*weights-1))
+            # imbalance*bid_limit_intensities[:n]*self.damping_weights[:n]            
             # adjust limit order intensities
-            # I = -1, price down, cancel limit buy orders (bid side), dont cancel limit sell orders (ask side)
-            # bid_limit_intensities = ask_limit_intensities = self.limit_intensities
-            bid_limit_intensities[0] = bid_limit_intensities[0]*(1+imbalance)
-            # I = 1, price up, cancel limit sell orders (ask side), dont cancel limit buy orders (bid side)
-            ask_limit_intensities[0] = ask_limit_intensities[0]*(1-imbalance)
+            # if I=1, price goes up --> more limit buy orders
+            ##
+            bid_limit_intensities = self.limit_intensities.copy()
+            ask_limit_intensities = self.limit_intensities.copy()
+            bid_limit_intensities = bid_limit_intensities*(1+pos)
+            ask_limit_intensities = ask_limit_intensities*(1+neg)
+            # bid_limit_intensities[:n] = bid_limit_intensities[:n]*(1+imbalance)
+            # ask_limit_intensities[:n] = ask_limit_intensities[:n]*(1-imbalance)
+            # bid_limit_intensities = bid_limit_intensities*(1+imbalance*(2*weights-1))
+            # ask_limit_intensities = ask_limit_intensities*(1-imbalance*(2*weights-1))
+            # imbalance*bid_limit_intensities[:n]*self.damping_weights[:n]
+            # bid_limit_intensities[:n] = bid_limit_intensities[:n]*(1+0.001*pos)        
         else:
-            market_buy_intensity = self.market_intesity
-            market_sell_intensity = self.market_intesity
+            market_buy_intensity = market_sell_intensity = self.market_intesity
+            bid_limit_intensities = ask_limit_intensities = self.limit_intensities
 
-
-
-        bid_cancel_intensity = bid_cancel_intensity*bid_volumes 
-        ask_cancel_intensity = ask_cancel_intensity*ask_volumes
         probability = np.array([market_sell_intensity, market_buy_intensity, np.sum(bid_limit_intensities), np.sum(ask_limit_intensities), np.sum(bid_cancel_intensity), np.sum(ask_cancel_intensity)])        
+        assert np.all(probability >= 0), 'all probabilities must be > 0'
         waiting_time = self.np_random.exponential(np.sum(probability))
         # waiting_time = 1 
-        # waiting_time = 1 
-        # time += waiting_time
 
         probability = probability/np.sum(probability)
+        assert np.abs(np.sum(probability)-1) < 1e-6, f'{probability} doesnt sum to one'
         action, side = self.np_random.choice([('market', 'bid'), ('market', 'ask'), ('limit', 'bid'), ('limit', 'ask'), ('cancellation', 'bid'), ('cancellation', 'ask')], p=probability)
 
         volume = self.volume(action)
 
         if action == 'limit': 
-            # draw level 
             if side == 'bid': 
                 probability = bid_limit_intensities/np.sum(bid_limit_intensities)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
