@@ -21,8 +21,8 @@ class NoiseAgent():
                  volume_min, volume_max,
                  unit_volume,
                  damping_factor, imbalance_reaction, imbalance_factor,                 
-                 intitial_bid, 
-                 intial_ask 
+                 initial_bid, 
+                 initial_ask 
                  ):
         """"    
         Parameters:
@@ -50,8 +50,8 @@ class NoiseAgent():
         self.level = level 
         self.initial_level = self.level # number of levels to initialize (could be bigger than self.level)
         assert self.initial_level >= self.level, 'initial level must be bigger than level'
-        self.initial_bid = intitial_bid
-        self.initial_ask = intial_ask
+        self.initial_bid = initial_bid
+        self.initial_ask = initial_ask
                 
         assert self.level >= 10, 'level must be at least 10'
         self.limit_intensities = np.pad(limit_intensities, (0,self.level-len(limit_intensities)), 'constant', constant_values=(0))
