@@ -32,12 +32,12 @@ noise_agent_config['limit_intensities'] = limit_intensities
 noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
 # volume related things 
 noise_agent_config['volume_distribution'] = 'half_normal'
-noise_agent_config['market_mean'] = 1
+noise_agent_config['market_mean'] = 0
 noise_agent_config['market_std'] = 2
-noise_agent_config['limit_mean'] = 1
-noise_agent_config['limit_std'] = 1
-noise_agent_config['cancel_mean'] = 1
-noise_agent_config['cancel_std'] = 1
+noise_agent_config['limit_mean'] = 0
+noise_agent_config['limit_std'] = 2
+noise_agent_config['cancel_mean'] = 0
+noise_agent_config['cancel_std'] = 2
 noise_agent_config['volume_min'] = 1
 noise_agent_config['volume_max'] = 20
 noise_agent_config['unit_volume'] = False
@@ -46,7 +46,7 @@ noise_agent_config['level'] = 30
 noise_agent_config['initial_shape'] = 1 
 noise_agent_config['initial_shape_file'] = None 
 # imbalance related stuff 
-noise_agent_config['damping_factor'] = 1.0
+noise_agent_config['damping_factor'] = 0.75
 noise_agent_config['imbalance_reaction'] = False
 noise_agent_config['imbalance_factor'] = 3
 # 
