@@ -365,6 +365,9 @@ class LimitOrderBook:
                 break
         if remaining_market_volume > 0:
             warnings.warn("market volume not fully executed")
+            print(f'order time: {order.time}')
+            print(f'bid volumes: {self.level2("bid")[1][:10]}')
+            print(f'ask volumes: {self.level2("ask")[1]}')
         if self.only_volumes:
             return None
 
