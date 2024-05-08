@@ -34,8 +34,8 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     ask_volumes = np.hstack(np.array(level2[ask_volumes]))
 
     # comment this line to use use tick time: 1,2,3, and so on 
-    trades.time = event_times
-    time = np.array(trades.time)
+    # trades.time = event_times
+    time = np.array(event_times)
     # time = event_times
     N = len(time)
 
@@ -69,7 +69,7 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     plt.scatter(trades[trades.sell>0].time.values, level2.best_bid_price[trades.sell>0], color='black', marker='v', s= (scale/M)*trades[trades.sell>0].sell.values)
     
     plt.xlim(0,time[-1])
-    plt.ylim(993,1006)
+    plt.ylim(995,1008)
     
     # handles, labels = plt.gca().get_legend_handles_labels()
     # Set x and y tick size
@@ -79,8 +79,8 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     plt.ylabel('Price', fontsize=16)
     
 
-    lg = plt.legend(['best bid price', 'best ask price', 'market buy', 'market sell'], prop={'size': 10}, loc='upper right')
-    print(lg.legendHandles[2]._sizes)
+    lg = plt.legend(['best bid price', 'best ask price', 'market buy', 'market sell'], prop={'size': 10}, loc='upper left')
+    # print(lg.legendHandles[2]._sizes)
     # print(lg.legendHandles[0]._sizes)
     lg.legendHandles[2]._sizes = [100]
     lg.legendHandles[3]._sizes = [100]
