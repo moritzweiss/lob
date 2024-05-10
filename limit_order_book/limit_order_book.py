@@ -628,9 +628,8 @@ class LimitOrderBook:
 
 
     def log_to_df(self):
-        time = np.arange(0, self.update_n)        
         data = {'best_bid_price': self.data.best_bid_prices, 'best_ask_price': self.data.best_ask_prices, 'best_bid_volume': self.data.best_bid_volumes, 'best_ask_volume': self.data.best_ask_volumes}
-        # data = pd.DataFrame({'best_bid_volume': self.data.best_bid_volumes, 'best_ask_volume': self.data.best_ask_volumes})
+        # level 2 data
         bid_prices = np.vstack(self.data.bid_prices)
         ask_prices = np.vstack(self.data.ask_prices)
         bid_volumes = np.vstack(self.data.bid_volumes)
@@ -642,15 +641,18 @@ class LimitOrderBook:
             data[f'ask_volume_{i}'] = ask_volumes[:,i]
         data['time'] = self.data.time_stamps
         data = pd.DataFrame.from_dict(data)
+        # orders
         orders = {}
         order_type = ['M' if x.type == 'market' else 'L' if x.type == 'limit' else 'C' if x.type == 'cancellation' else 'PC' if x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
         order_side = [x.side if x.type == 'limit' or x.type == 'market' or x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
         order_size = [x.volume if x.type == 'limit' or x.type == 'market' or x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]
         order_price = [x.price if x.type == 'limit' or x.type == 'cancellation_by_price_volume' else np.nan for x in self.data.orders]        
+        order_time = [x.time for x in self.data.orders]
         orders['type'] = order_type
         orders['side'] = order_side
         orders['size'] = order_size
         orders['price'] = order_price        
+        orders['time'] = order_time
         orders = pd.DataFrame(orders)
         # 
         market_orders = {}
@@ -658,8 +660,6 @@ class LimitOrderBook:
         market_orders['sell'] = self.data.market_sell
         market_orders['time'] = self.data.time_stamps
         market_orders = pd.DataFrame(market_orders)
-
-
         return data, orders, market_orders
         
 
