@@ -19,3 +19,5 @@ rewards/*
 .DS_Store
 data_new.npz
 data.npz 
+new_plots/*
+
