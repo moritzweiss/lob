@@ -11,7 +11,6 @@ environ['OPENBLAS_NUM_THREADS'] = N_THREADS
 environ['MKL_NUM_THREADS'] = N_THREADS
 environ['VECLIB_MAXIMUM_THREADS'] = N_THREADS
 environ['NUMEXPR_NUM_THREADS'] = N_THREADS
-from typing import Any
 from agents import NoiseAgent, MarketAgent, SubmitAndLeaveAgent, LinearSubmitLeaveAgent, RLAgent, StrategicAgent
 import gymnasium as gym 
 from limit_order_book.plotting import heat_map, plot_prices
@@ -20,81 +19,91 @@ from limit_order_book.limit_order_book import LimitOrderBook
 import numpy as np
 from gymnasium.spaces import Box
 import os
+from config.config import noise_agent_config, sl_agent_config, market_agent_config, rl_agent_config, l_sl_agent_config, strategic_agent_config
 
 # TODO: test critical methods reward calculation and so on 
 # TODO: redo testing of limit order book 
-
+# Question: how does seeding work in rllib with multiple workers? MAKE SURE noise agent has its own specific seed 
 
 class Market(gym.Env):
     """ 
     Attributes:
-        - env_type: noise, flow, strategic, controls the type of environment
+        - market_type: noise, flow, strategic, controls the type of environment
         - execution_agent: market_agent, sl_agent, linear_sl_agent, rl_agent, controls the type of execution agent
-        - terminal_time: when to stop the environment
-        - benchmark_agent: None, market, linear_sl, sl, controls the type of benchmark agent (set to None without benchmark)
-        - terminal_time: the time at which the environment terminates
-        - action space
-        - observation space 
+        - terminal_time: when to stop the environment, typically = 1000
+        - frequency: frequency at which to act, typically = 100
         - noise_step: counts the steps of the noise agent (we use this as event time) 
         - physical_time: counts the physical time based on exponential distribution 
         - lob: limit order book instance 
-        - drift: drift of the strategic agent. we add this manually to make training easier
-        
-    TODO : 
-    - damping factor should move into a config file once it is fixed 
-    - level and terminal time should be moved into a config file 
-    - market, limit, frequency, should be moved into a config file 
-    - we should have one config option. like config=1 sets the options for all the other environments 
-        
+        - action space
+        - observation space 
+        - drift: drift of the strategic agent. we add this manually to make training easier. this should be raplced with a proxy        
     """ 
 
     def __init__(self, config):                
         """
         Arguments:
+            - mote: a config is used because this is preferred by rllib 
             - config: dictionary with the following keys
                 - seed: seed for the environment 
-                - type: noise, flow, strategic
+                - market_type: noise, flow, strategic
                 - execution_agent: market_agent, sl_agent, linear_sl_agent, rl_agent
                 - terminal_time: when to stop the environment
                 - volume: volume of the agent 
-                - level: number of levels in the order book 
-                - damping_factor: how much the order book is damped 
-                - market_volume: volume of market orders of the strategic agent 
-                - limit_volume: volume of limit order of the strategic agent                
-                - frequency: frequency of the strategic agent 
-                - offset: offset of the strategic agent
-        TODO: seperate into two agents. one market and one limit agent. 
+        Remark: could seperate into two agents. one market and one limit agent. 
         """
+        # execution agent stuff: 
         if config['execution_agent'] == 'market_agent':
-            self.execution_agent = MarketAgent(volume=config['volume'])
+            # use market agent config here 
+            market_agent_config['volume'] = config['volume']
+            market_agent_config['terminal_time'] = config['terminal_time']
+            self.execution_agent = MarketAgent(**market_agent_config)
         elif config['execution_agent'] == 'sl_agent':
-            self.execution_agent = SubmitAndLeaveAgent(volume=config['volume'], terminal_time=config['terminal_time'])
+            # use sl agent config here
+            # update volume and terminal time 
+            sl_agent_config['volume'] = config['volume']
+            sl_agent_config['terminal_time'] = config['terminal_time']
+            self.execution_agent = SubmitAndLeaveAgent(**sl_agent_config)
         elif config['execution_agent'] == 'linear_sl_agent':
-            self.execution_agent = LinearSubmitLeaveAgent(volume=config['volume'], terminal_time=config['terminal_time'], frequency=100)
+            # use linear sl agent config here
+            l_sl_agent_config['volume'] = config['volume']
+            l_sl_agent_config['terminal_time'] = config['terminal_time']
+            l_sl_agent_config['frequency'] = config['frequency']
+            self.execution_agent = LinearSubmitLeaveAgent(**l_sl_agent_config)
         elif config['execution_agent'] == 'rl_agent':
-            self.execution_agent = RLAgent(volume=config['volume'], terminal_time=config['terminal_time'])
+            # use rl config here 
+            rl_agent_config['volume'] = config['volume']
+            rl_agent_config['terminal_time'] = config['terminal_time']
+            self.execution_agent = RLAgent(**rl_agent_config)
         elif config['execution_agent'] == None:
             self.execution_agent = None   
         else:
             raise ValueError(f"Unknown value for execution agent {config['execution_agent']}")
         
         # setting market environment 
-        assert config['type'] in ['noise', 'flow', 'strategic'], f'Unknown type {config["type"]}'
-        self.env_type = config['type']
+        assert config['market_type'] in ['noise', 'flow', 'strategic'], f'Unknown type {config["market_type"]}'
+        self.market_type = config['market_type']
 
         # setting noise agent
-        if config['type'] == 'noise':
-            imbalance = False
+        noise_agent_config['rng'] = np.random.default_rng(config['seed'])
+        if config['market_type'] == 'noise':
+            noise_agent_config['imbalance_reaction'] = False
+            noise_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
         else:
-            imbalance = True
-
-        assert config['damping_factor'] > 0, 'damping factor must be > 0'
-
-        self.noise_agent = NoiseAgent(level=config['level'], rng=np.random.default_rng(config['seed']), imbalance_reaction=imbalance, initial_shape_file=f'{parent_dir}/data_new_param.npz', config_n=1, damping_factor=config['damping_factor'])
+            noise_agent_config['imbalance_reaction'] = True
+            noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
+        # TODO: review whats happening here !! 
+        # worker_index = getattr(config, 'worker_index', None)
+        # if worker_index is not None:
+        #     super().reset(seed=config['seed']+worker_index)
+        # else:
+        #     super().reset(seed=config['seed'])
+        self.noise_agent = NoiseAgent(**noise_agent_config)
         
         # setting strategic agent
-        if config['type'] == 'strategic':
-            self.strategic_agent = StrategicAgent(frequency=20, market_volume=1, limit_volume=4, rng=np.random.default_rng(config['seed']), offset=19)
+        if config['market_type'] == 'strategic':
+            strategic_agent_config['rng'] = np.random.default_rng(config['seed'])
+            self.strategic_agent = StrategicAgent(**strategic_agent_config)
         else:
             self.strategic_agent = None
 
@@ -104,7 +113,7 @@ class Market(gym.Env):
         # observation space is time and inventory 
         # 1: time, 2: inventory, 3:active volume, 4:inactive volume, 5: best_bid_drift, 6: spread, 7:shape of the book:, 8: own order distribution [l1, l2, l3, >l4], 9: inactive volume, imbalance 
         # 6 + 6 + 4 + 1 = 16
-        if config['type'] == 'strategic':
+        if config['market_type'] == 'strategic':
             # add one observation for drift 
             self.observation_space = Box(low=-np.inf, high=np.inf, shape=(17+1,), seed=config['seed'], dtype=np.float32) 
         else:
@@ -117,16 +126,8 @@ class Market(gym.Env):
 
         ## 
         # print(f'worker index is: {worker_index}')
-        worker_index = getattr(config, 'worker_index', None)
-
-        #
-        
-        # print(f"the seed is {config['seed']}")
-        if worker_index is not None:
-            super().reset(seed=config['seed']+worker_index)
-        else:
-            super().reset(seed=config['seed'])
-        
+        # not sure what this is doing. but whatever. lets keep this here for now. 
+                
         self.physical_time = None  
         self.noise_step = None 
         self.lob = None 
@@ -145,7 +146,7 @@ class Market(gym.Env):
         - run 50 transitions
 
         Returns:
-            - observation (observation depens on the execution agent, sl agent just returns None, rl agent returns full observation)
+            - observation (observation depends on the execution agent, sl agent just returns None, rl agent returns full observation)
             - {}: empty dictionary
         """
         super().reset(seed=seed)
@@ -166,7 +167,6 @@ class Market(gym.Env):
             list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id]
         else:
             list_of_agents = [self.execution_agent.agent_id, self.noise_agent.agent_id, self.strategic_agent.agent_id]
-        # could implement a reset method for the limit order book
         self.lob = LimitOrderBook(level=self.noise_agent.level, list_of_agents = list_of_agents)
         orders = self.noise_agent.initialize(time=self.noise_step)
         reward, terminated = self.place_and_update(orders)
@@ -211,7 +211,7 @@ class Market(gym.Env):
     def single_transition(self, action=None):
         total_reward = 0
         # orders by execution agent 
-        if self.noise_step % self.execution_agent.frequency == 0 and self.noise_step >= 0:
+        if self.execution_agent is not None:
             if self.execution_agent.agent_id == 'rl_agent':
                 order = self.execution_agent.generate_order(self.noise_step, self.lob, action)
             else:
@@ -225,13 +225,13 @@ class Market(gym.Env):
         reward, terminated = self.place_and_update([order])
         total_reward += reward
         # strategic agent
-        if self.noise_step%self.strategic_agent.frequency == self.strategic_agent.offset:
+        if self.strategic_agent is not None:
             order_list = self.strategic_agent.generate_order(self.lob, self.noise_step)
             reward, terminated = self.place_and_update(order_list)
             total_reward += reward
-        # log orders here              
         self.noise_step += 1 
         assert self.noise_step <= self.terminal_time, 'noise step should not exceed terminal time'
+        # handle terminal condition 
         if self.noise_step == self.terminal_time and not terminated:
             order_list = self.execution_agent.sell_remaining_position(self.lob, self.noise_step)
             reward, terminated = self.place_and_update(order_list)
@@ -253,7 +253,7 @@ class Market(gym.Env):
 
     def _get_observation(self):
         if self.execution_agent.agent_id == 'rl_agent':
-            if self.env_type == 'strategic':
+            if self.market_type == 'strategic':
                 assert self.drift is not None
                 observation = np.append(self.execution_agent.get_observation(self.noise_step, self.lob), self.drift).astype(np.float32)
             else:
@@ -267,23 +267,21 @@ class Market(gym.Env):
         ask = self.lob.get_best_price('ask')
         return {'total_reward': self.execution_agent.cummulative_reward, 'time': self.noise_step, 'volume': self.execution_agent.volume, 'initial_volume': self.execution_agent.initial_volume, 
                 'initial_bid': self.execution_agent.reference_bid_price, 'limit_sell':self.execution_agent.limit_sells, 'market_sell': self.execution_agent.market_sells, 
-                'limit_buy': self.execution_agent.limit_buys, 'market_buy': self.execution_agent.market_buys, 'best_bid': bid, 'best_ask': ask}
+                'best_bid': bid, 'best_ask': ask}
 
-
-config = {'seed':0, 'type':'noise', 'execution_agent':'rl_agent', 'terminal_time':int(1e3), 'volume':40, 'level':30, 'damping_factor':0.5, 'market_volume':1, 'limit_volume':4, 'frequency':20, 'offset':-1}  
 
 
 if __name__ == '__main__': 
-    config = {'seed':7, 'type':'strategic', 'execution_agent':'linear_sl_agent', 'terminal_time':int(2e2), 'volume':20, 'level':30, 'damping_factor':1.0, 'market_volume':2, 'limit_volume':5, 'frequency':50}   
+    config = {'seed':2, 'market_type':'noise', 'execution_agent':'sl_agent', 'terminal_time':int(3e2), 'volume':40}  
     print(config)
     M = Market(config)
+    print('init is done')
     price_moves = []
     for n in range(1):
         r = 0 
         print(f'episode {n}')        
         observation, _ = M.reset()
         # assert observation in M.observation_space
-        # print(f'initial observation: {observation}')x
         terminated = False 
         while not terminated:
             action = M.action_space.sample()
@@ -309,10 +307,13 @@ if __name__ == '__main__':
 
     print(info)            
     data, orders, market_orders = M.lob.log_to_df()
-    # heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=600)
+    # use physical time 
+    # heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=200)
+    # use tick time 
+    heat_map(market_orders, data, event_times=market_orders.time, max_level=5, max_volume=40, scale=1000)
     # plot_prices(level2=data, trades=orders, marker_size=200)
-    # plt.tight_layout()
-    # plt.savefig('heat.pdf')
+    plt.tight_layout()
+    plt.savefig('heat.pdf')
     # plt.show()
     # print(max(price_moves))
     # print(min(price_moves)) 

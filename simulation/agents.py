@@ -74,7 +74,7 @@ class NoiseAgent():
             self.initial_shape = np.array([initial_shape]*self.initial_level)            
         else:
             shape = np.load(initial_shape_file) 
-            self.initial_shape = np.clip(np.rint(np.mean([shape['bid_shape'], shape['ask_shape']], axis=0)), 1, np.inf)      
+            self.initial_shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf)      
 
         self.agent_id = 'noise_agent'
 
@@ -87,12 +87,10 @@ class NoiseAgent():
     def initialize(self, time): 
         # ToDo: initial bid and ask as variable 
         orders = [] 
-        for idx, price in enumerate(np.arange(self.initial_bid, self.initial_bid-self.initial_level, -1)):
-            # Note: in principle this is not correct of the spread of the initial shape is > 1 
-            # leave as is for now. the spread is mostly = 1 
+        for idx, price in enumerate(np.arange(self.initial_ask-1, self.initial_ask-1-self.initial_level, -1)):
             order = LimitOrder(agent_id=self.agent_id, side='bid', price=price, volume=self.initial_shape[idx], time=time)
             orders.append(order)
-        for idx, price in enumerate(np.arange(self.initial_ask, self.initial_ask+self.initial_level, 1)): 
+        for idx, price in enumerate(np.arange(self.initial_bid+1, self.initial_bid+self.initial_level+1, 1)): 
             order = LimitOrder(agent_id=self.agent_id, side='ask', price=price, volume=self.initial_shape[idx], time=time)
             orders.append(order)
         return orders
@@ -302,7 +300,6 @@ class ExecutionAgent():
     """
     def __init__(self, volume, agent_id) -> None:
         self.initial_volume = volume
-        self.frequency = 100
         self.agent_id = agent_id
         self.reset()
     
@@ -409,9 +406,9 @@ class ExecutionAgent():
 
 class MarketAgent(ExecutionAgent):
 
-    def __init__(self, volume, agent_id) -> None:
+    def __init__(self, volume, when_to_place) -> None:
         super().__init__(volume, 'market_agent')
-        self.when_to_place = 0 
+        self.when_to_place = when_to_place
                     
     def generate_order(self, time, lob):
         assert self.active_volume >= 0 
@@ -427,10 +424,10 @@ class MarketAgent(ExecutionAgent):
 
 class SubmitAndLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, terminal_time=100) -> None:
+    def __init__(self, volume, when_to_place, terminal_time) -> None:
         super().__init__(volume, 'sl_agent')
         self.terminal_time = terminal_time
-        self.when_to_place = 0 
+        self.when_to_place = when_to_place
                         
     def generate_order(self, time, lob):
         assert self.volume >= 0
@@ -450,9 +447,8 @@ class SubmitAndLeaveAgent(ExecutionAgent):
 
 class LinearSubmitLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, terminal_time=1000, frequency=100) -> None:
-        super().__init__(volume)
-        self.agent_id = 'linear_sl_agent'
+    def __init__(self, volume, terminal_time, frequency) -> None:
+        super().__init__(volume=volume, agent_id='linear_sl_agent')
         self.terminal_time = terminal_time
         self.when_to_place = 0 
         self.frequency = frequency
@@ -469,7 +465,7 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         assert self.active_volume >= 0 
         if time == self.when_to_place:
             self.reference_bid_price = lob.get_best_price('bid')
-        if time % self.frequency == 0 and time < self.terminal_time:
+        if time % self.frequency == 0 and time < self.terminal_time and time >= self.when_to_place:
             limit_price = lob.get_best_price('bid')+1
             return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice, time=time)]
         else:
@@ -482,11 +478,12 @@ class RLAgent(ExecutionAgent):
     """
         - this agent takes in an action and then generates an order
     """
-    def __init__(self, volume, terminal_time) -> None:
+    def __init__(self, volume, terminal_time, when_to_place, frequency) -> None:
         super().__init__(volume, 'rl_agent')
         self.orders_within_range = set()
-        self.when_to_place = 0
+        self.when_to_place = when_to_place
         self.terminal_time = terminal_time
+        self.frequency = frequency
         
     
     def generate_order(self, time, lob, action):
@@ -496,75 +493,77 @@ class RLAgent(ExecutionAgent):
         """
         if time == self.when_to_place:
             self.reference_bid_price = lob.get_best_price('bid') 
-
-        best_bid = lob.get_best_price('bid')
-
-        action = np.exp(action) / np.sum(np.exp(action), axis=0)
-        # print(action.round(2))
-
         
-        # keep track of total cancelled volume 
-        cancelled_volume = 0
-        order_list = []
-        # self.orders_within_range is set in the get_observation function
-        # cancel orders that are not on levels >= l4 
-        orders_to_cancel = lob.order_map_by_agent[self.agent_id].difference(self.orders_within_range)
-        for order_id in orders_to_cancel:
-            order_list.append(Cancellation(self.agent_id, order_id))
-            cancelled_volume += lob.order_map[order_id].volume
-        
-        assert cancelled_volume == self.volume_per_level[-1]
-        
-        # target volumes 
-        target_volumes = []
-        available_volume = self.volume 
-        for l in range(len(action)):
-            # [market,l1 ,l2, ,l3, inactive]
-            # np.round rounds values in [0, 0.5] to 0, and values in [0.5, 1] to 1 
-            volume_on_level = min(np.round(action[l]*self.volume).astype(int), available_volume)
-            available_volume -= volume_on_level
-            target_volumes.append(volume_on_level) 
-        target_volumes[-1] += available_volume
-        
-        # current volumes contains levels l1, l2, l3, >=l4
-        current_volumes = self.volume_per_level
-        current_volumes.extend([self.volume - self.active_volume + cancelled_volume]) 
-        current_volumes.insert(0, 0)
+        if time >= self.when_to_place and time < self.terminal_time and time % self.frequency == 0:
 
-        l = 0 
-        m = 0 
-        # market_sells = []
-        for level in range(4): 
-            # 0, 1, 2, 3
-            if level == 0:
-                if target_volumes[level] > 0:
-                    order = MarketOrder(self.agent_id, 'bid', target_volumes[level])
-                    order_list.append(order)
-                    # market_sells.append(order)
-                    m = target_volumes[level]
-            else:
-                diff = target_volumes[level] - current_volumes[level]
-                limit_price = best_bid+level
-                if diff > 0:
-                    order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, diff))
-                    l += diff
-                elif diff < 0:
-                    order_list.insert(0, CancellationByPriceVolume(agent_id=self.agent_id, side='ask', price=limit_price, volume=-diff))
-                    cancelled_volume += -diff
+            best_bid = lob.get_best_price('bid')
+
+            action = np.exp(action) / np.sum(np.exp(action), axis=0)
+            # print(action.round(2))            
+            # keep track of total cancelled volume 
+            cancelled_volume = 0
+            order_list = []
+            # self.orders_within_range is set in the get_observation function
+            # cancel orders that are not on levels >= l4 
+            orders_to_cancel = lob.order_map_by_agent[self.agent_id].difference(self.orders_within_range)
+            for order_id in orders_to_cancel:
+                order_list.append(Cancellation(self.agent_id, order_id))
+                cancelled_volume += lob.order_map[order_id].volume
+            
+            assert cancelled_volume == self.volume_per_level[-1]
+            
+            # target volumes 
+            target_volumes = []
+            available_volume = self.volume 
+            for l in range(len(action)):
+                # [market,l1 ,l2, ,l3, inactive]
+                # np.round rounds values in [0, 0.5] to 0, and values in [0.5, 1] to 1 
+                volume_on_level = min(np.round(action[l]*self.volume).astype(int), available_volume)
+                available_volume -= volume_on_level
+                target_volumes.append(volume_on_level) 
+            target_volumes[-1] += available_volume
+            
+            # current volumes contains levels l1, l2, l3, >=l4
+            current_volumes = self.volume_per_level
+            current_volumes.extend([self.volume - self.active_volume + cancelled_volume]) 
+            current_volumes.insert(0, 0)
+
+            l = 0 
+            m = 0 
+            # market_sells = []
+            for level in range(4): 
+                # 0, 1, 2, 3
+                if level == 0:
+                    if target_volumes[level] > 0:
+                        order = MarketOrder(self.agent_id, 'bid', target_volumes[level])
+                        order_list.append(order)
+                        # market_sells.append(order)
+                        m = target_volumes[level]
                 else:
-                    pass
+                    diff = target_volumes[level] - current_volumes[level]
+                    limit_price = best_bid+level
+                    if diff > 0:
+                        order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, diff))
+                        l += diff
+                    elif diff < 0:
+                        order_list.insert(0, CancellationByPriceVolume(agent_id=self.agent_id, side='ask', price=limit_price, volume=-diff))
+                        cancelled_volume += -diff
+                    else:
+                        pass
 
-        # new limit and market order must match the cancelled volume
-        assert l >= 0
-        assert m >= 0
-        assert self.volume >= self.active_volume >= cancelled_volume >= 0
-        free_budget = cancelled_volume + (self.volume - self.active_volume)
-        assert 0 <= free_budget <= self.volume
-        assert 0 <= l + m <= free_budget, 'l + m must be less than or equal to the free budget'
-        # target volumes[-1] = inactive = (volume - active volume) + cancelled - l - m 
-        assert target_volumes[-1] == (self.volume - self.active_volume) + cancelled_volume - l - m 
-        # TODO: create check to test validity of the order list
-        return order_list
+            # new limit and market order must match the cancelled volume
+            assert l >= 0
+            assert m >= 0
+            assert self.volume >= self.active_volume >= cancelled_volume >= 0
+            free_budget = cancelled_volume + (self.volume - self.active_volume)
+            assert 0 <= free_budget <= self.volume
+            assert 0 <= l + m <= free_budget, 'l + m must be less than or equal to the free budget'
+            # target volumes[-1] = inactive = (volume - active volume) + cancelled - l - m 
+            assert target_volumes[-1] == (self.volume - self.active_volume) + cancelled_volume - l - m 
+            # TODO: create check to test validity of the order list
+            return order_list
+        else:
+            return None 
 
     
     def get_observation(self, time, lob):        
@@ -648,20 +647,23 @@ class StrategicAgent():
         return None 
     
     def generate_order(self, lob, time):        
-        if self.direction == 'sell':                
-            limit_price = lob.get_best_price('bid')+1
-            order_list = []
-            order_list.append(MarketOrder(self.agent_id, 'bid', self.market_order_volume, time))
-            order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, self.limit_order_volume, time))                        
-            return order_list
-        elif self.direction == 'buy':
-            limit_price = lob.get_best_price('ask')-1
-            order_list = []
-            order_list.append(MarketOrder(self.agent_id, 'ask', self.market_order_volume, time))
-            order_list.append(LimitOrder(self.agent_id, 'bid', limit_price, self.limit_order_volume, time))                        
-            return order_list
+        if time % self.frequency == self.offset:
+            if self.direction == 'sell':                
+                limit_price = lob.get_best_price('bid')+1
+                order_list = []
+                order_list.append(MarketOrder(self.agent_id, 'bid', self.market_order_volume, time))
+                order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, self.limit_order_volume, time))                        
+                return order_list
+            elif self.direction == 'buy':
+                limit_price = lob.get_best_price('ask')-1
+                order_list = []
+                order_list.append(MarketOrder(self.agent_id, 'ask', self.market_order_volume, time))
+                order_list.append(LimitOrder(self.agent_id, 'bid', limit_price, self.limit_order_volume, time))                        
+                return order_list
+            else:
+                raise ValueError(f'direction must be either buy or sell, got {self.direction}')
         else:
-            raise ValueError(f'direction must be either buy or sell, got {self.direction}')
+            return None 
 
         
     def reset(self):
