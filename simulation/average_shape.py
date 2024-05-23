@@ -19,10 +19,11 @@ import seaborn as sns
 from config.config import noise_agent_config
 
 
-def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False):
+def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False, imbalance_factor=3):
     noise_agent_config['initial_shape'] = initial_shape
     noise_agent_config['damping_factor'] = damping_factor
     noise_agent_config['imbalance_reaction'] = imbalance
+    noise_agent_config['imbalance_factor'] = imbalance_factor
     noise_agent_config['rng'] = rng    
     NA = NoiseAgent(**noise_agent_config)
     LOB = LimitOrderBook(list_of_agents=[NA.agent_id], level=30, only_volumes=True)
@@ -33,8 +34,8 @@ def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_
         LOB.process_order(order)
         LOB.clear_orders(30)
     T = len(LOB.data.bid_volumes)
-    bid_volumes = LOB.data.bid_volumes[-int(T/2):][::100]
-    ask_volumes = LOB.data.ask_volumes[-int(T/2):][::100]
+    bid_volumes = LOB.data.bid_volumes[-int(T/2):][::1000]
+    ask_volumes = LOB.data.ask_volumes[-int(T/2):][::1000]
     # bid_volumes = LOB.data.bid_volumes
     # ask_volumes = LOB.data.ask_volumes
     # bestb = np.array(LOB.data.best_bid_prices[-int(T/2):][::100])
@@ -52,10 +53,10 @@ def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_
     total_trades = np.sum(window, axis=-1)
     return bid_volumes, ask_volumes, midp_diff, midp, window.sum(axis=-1)
 
-def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance):
+def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance, imbalance_factor=3):
     samples_per_cpu = int(n_samples/n_cpus)
     with Pool(n_cpus) as p:
-        out = p.starmap(average_shape, [(samples_per_cpu, default_rng(seed), initial_shape, damping_factor, imbalance) for seed in range(n_cpus)])    
+        out = p.starmap(average_shape, [(samples_per_cpu, default_rng(seed), initial_shape, damping_factor, imbalance, imbalance_factor) for seed in range(n_cpus)])    
     bid_volumes, ask_volumes, midp_diff, midp, trades = zip(*out)
     bid_volumes = list(itertools.chain.from_iterable(bid_volumes))
     ask_volumes = list(itertools.chain.from_iterable(ask_volumes))
@@ -69,44 +70,45 @@ if __name__ == '__main__':
     # bidv5, askv5, midp5 = mp_rollout(N, 50, 1, 0.5, True)
     if True: 
         N = int(1e5)
-        bidv, askv, midp_diff, midp, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=False)
-        bidv_imb, askv_imb, midp_diff_imb, midp_imb, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=1, imbalance=True)
-        bidv_imb_5, askv_imb_5, midp_diff_imb_5, midp_imb_5, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
-        bidv_imb_7, askv_imb_7, midp_diff_imb_7, midp_imb_7, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=True)
+        bidv, askv, midp_diff, midp, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=False)
+        bidv_imb, askv_imb, midp_diff_imb, midp_imb, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=2.0, imbalance=True, imbalance_factor=3)
+        # bidv_imb_5, askv_imb_5, midp_diff_imb_5, midp_imb_5, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
+        # bidv_imb_7, askv_imb_7, midp_diff_imb_7, midp_imb_7, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=True)
         plt.figure(figsize=(10, 6))
         plt.xlim(0, len(midp))
         plt.grid(True)
         plt.plot(midp, label='Noise')
         plt.plot(midp_imb, label='Noise+Flow, c=1')
-        plt.plot(midp_imb_5, label='Noise+Flow, c=0.5')
-        plt.plot(midp_imb_7, label='Noise+Flow, c=0.75')
+        # plt.plot(midp_imb_5, label='Noise+Flow, c=0.5')
+        # plt.plot(midp_imb_7, label='Noise+Flow, c=0.75')
         plt.legend()
         plt.savefig('midp.pdf', dpi=350)
         print('DONE')
-    N = int(5e6)
-    # damping_factor = 0.5 
-    start_time = timeit.default_timer()
-    bidv, askv, midp_diff, trades = mp_rollout(N, 50, 10, 0, False)
-    # print(np.nanmean(bidv, axis=0))
-    # np.savez('initial_shape/noise.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    bidv_imb, akv_imb, midp_diff_imb, trades_imb = mp_rollout(N, 50, 10, damping_factor=1.0, imbalance=True)
-    bidv_imb_5, askv_imb_5, midp_diff_imb_5, trades_imb_5 = mp_rollout(N, 50, 10, damping_factor=0.5, imbalance=True)
-    bidv_imb_7, askv_imb_7, midp_diff_imb_7, trades_imb_7 = mp_rollout(N, 50, 10, damping_factor=0.75, imbalance=True)
-    # np.savez('initial_shape/noise_flow_75.npz', bidv=np.nanmean(bidv_imb_7, axis=0), askv=np.nanmean(askv_imb_7, axis=0))
-    end_time = timeit.default_timer()
-    print(f"Execution time: {end_time - start_time} seconds")
-    if True:        
-        plt.figure(figsize=(10, 6))
+    if True:
+        N = int(1e6)
+        # damping_factor = 0.5 
+        start_time = timeit.default_timer()
+        bidv, askv, midp_diff, trades = mp_rollout(N, 60, 1, 0, False)
+        # print(np.nanmean(bidv, axis=0))
+        np.savez('initial_shape/noise_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+        bidv_imb, akv_imb, midp_diff_imb, trades_imb = mp_rollout(N, 60, 1, damping_factor=0.75, imbalance=True)
+        # bidv_imb_5, askv_imb_5, midp_diff_imb_5, trades_imb_5 = mp_rollout(N, 50, 10, damping_factor=0.5, imbalance=True)
+        # bidv_imb_7, askv_imb_7, midp_diff_imb_7, trades_imb_7 = mp_rollout(N, 50, 10, damping_factor=0.75, imbalance=True)
+        np.savez('initial_shape/noise_flow_75_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+        end_time = timeit.default_timer()
+        print(f"Execution time: {end_time - start_time} seconds")
+    if True: 
+        # bidv_imb, akv_imb, midp_diff_imb, trades_imb = mp_rollout(N, 50, 10, damping_factor=1.0, imbalance=False, imbalance_factor=1)
+        # bidv_imb_5, askv_imb_5, midp_diff_imb_5, trades_imb_3 = mp_rollout(N, 50, 10, damping_factor=0.75, imbalance=True, imbalance_factor=3)
         # print(midp_diff_imb)
-        sns.kdeplot(trades, fill=False, label='Noise')
-        sns.kdeplot(trades_imb, fill=False, label=f'Noise+Flow,c={1}')
-        sns.kdeplot(trades_imb_5, fill=False, label=f'Noise+Flow,c={0.75}')
-        sns.kdeplot(trades_imb_7, fill=False, label=f'Noise+Flow,c={0.5}')
+        plt.figure(figsize=(10, 6))
+        sns.kdeplot(trades, fill=False, label=f'Noise')
+        sns.kdeplot(trades_imb, fill=False, label=f'Noise+Flow,d={3}')
         plt.grid(True)
         plt.legend()
-        plt.xlabel('Number of Trades', fontsize=16)
+        plt.xlabel('Number of Trades, Unit Volumes', fontsize=16)
         plt.tight_layout()
-        plt.savefig('trades_histogram.pdf', dpi=350)
+        plt.savefig('trades_histogram.pdf', dpi=350)        
     if True:
         # bidv, askv, midp = average_shape(n_time_steps=int(1e4), rng=defƒault_rng(0), initial_shape=1)
         fig, axs = plt.subplots(figsize=(10, 6))
@@ -117,34 +119,15 @@ if __name__ == '__main__':
         fig, axs = plt.subplots(figsize=(10, 6))
         plot_average_book_shape(bidv_imb, akv_imb, level=10, file_name=f'noise_flow', title=f'noise+flow,c={1}', ax=axs)        
         fig.tight_layout()
-        fig.savefig('average_shape1.pdf', dpi=350)
-        #
-        fig, axs = plt.subplots(figsize=(10, 6))
-        plot_average_book_shape(bidv_imb_7, askv_imb_7, level=10, file_name=f'noise_flow', title=f'noise+flow,c={0.75}', ax=axs)
-        fig.tight_layout()
-        fig.savefig('average_shape75.pdf', dpi=350)
-        #
-        fig, axs = plt.subplots(figsize=(10, 6))
-        plot_average_book_shape(bidv_imb_5, askv_imb_5, level=10, file_name=f'noise_flow', title=f'noise+flow,c={0.5}', ax=axs)
-        fig.tight_layout()
-        fig.savefig('average_shape05.pdf', dpi=350)
-        # plot_average_book_shape(bidv5, askv5, level=10, file_name=f'shape_c=0.5', title='c=0.5', ax=axs[2])
-        # plot_average_book_shape(bidv0, askv0, level=10, file_name=f'shape_c=0', title='c=0', ax=axs[3])
-        # axs[4].set_xlabel('distance to mid')
-        # plt.figure()
-        # plot_average_book_shape(bidv, askv, level=10, file_name=f'shape_c=1', title='c=1')
-        # plt.figure()
-        # plot_average_book_shape(bidv0, askv0, level=10, file_name=f'shape_c=0', title='c=0')
-        # plt.figure()
-        # plot_average_book_shape(bidv5, askv5, level=10, file_name=f'shape_c=0.5', title='c=no imb reaction')
+        fig.savefig('average_shape_imbalance.pdf', dpi=350)
     if True:
         N = int(2e3)        
         plt.figure(figsize=(10, 6))
         # print(midp_diff_imb)
         sns.kdeplot(midp_diff, fill=False, label='Noise')
-        sns.kdeplot(midp_diff_imb, fill=False, label=f'Noise+Flow,c={1}')
-        sns.kdeplot(midp_diff_imb_7, fill=False, label=f'Noise+Flow,c={0.75}')
-        sns.kdeplot(midp_diff_imb_5, fill=False, label=f'Noise+Flow,c={0.5}')
+        sns.kdeplot(midp_diff_imb, fill=False, label=f'Noise+Flow')
+        # sns.kdeplot(midp_diff_imb_7, fill=False, label=f'Noise+Flow,c={0.75}')
+        # sns.kdeplot(midp_diff_imb_5, fill=False, label=f'Noise+Flow,c={0.5}')
         # plt.hist(midp1_changes, bins=np.arange(-20,21,1), edgecolor='black', alpha=0.5, label='Damping Factor = 1')
         plt.xlabel('Change in Mid Price')
         plt.ylabel('Frequency')
@@ -152,7 +135,7 @@ if __name__ == '__main__':
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
-        plt.xlim(-30, 30)
+        plt.xlim(-10, 10)
         plt.savefig('midpn_changes_histogram.pdf', dpi=350)
     # if True: 
         # midpn_changes = np.diff(midpn)
