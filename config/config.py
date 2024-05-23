@@ -40,7 +40,7 @@ noise_agent_config['cancel_mean'] = 0
 noise_agent_config['cancel_std'] = 2
 noise_agent_config['volume_min'] = 1
 noise_agent_config['volume_max'] = 20
-noise_agent_config['unit_volume'] = False
+noise_agent_config['unit_volume'] = True
 noise_agent_config['level'] = 30 
 # 
 noise_agent_config['initial_shape'] = None
@@ -48,7 +48,8 @@ noise_agent_config['initial_shape_file'] = None
 # imbalance related stuff 
 noise_agent_config['damping_factor'] = 0.75
 noise_agent_config['imbalance_reaction'] = False
-noise_agent_config['imbalance_factor'] = 3
+noise_agent_config['imbalance_factor'] = 2.0
+
 # 
 noise_agent_config['rng'] = np.random.default_rng(0)
 # 
@@ -62,11 +63,11 @@ sl_agent_config['terminal_time'] = None
 sl_agent_config['when_to_place'] = 0 
 
 # linear sl 
-l_sl_agent_config = {}
-l_sl_agent_config['volume'] = None
-l_sl_agent_config['terminal_time'] = None
-l_sl_agent_config['when_to_place'] = 0
-l_sl_agent_config['frequency'] = None
+linear_sl_agent_config = {}
+linear_sl_agent_config['volume'] = None
+linear_sl_agent_config['terminal_time'] = None
+linear_sl_agent_config['when_to_place'] = 0
+linear_sl_agent_config['frequency'] = None
 
 # market 
 market_agent_config = {}
@@ -78,13 +79,10 @@ rl_agent_config = {}
 rl_agent_config['volume'] = None
 rl_agent_config['terminal_time'] = None
 rl_agent_config['when_to_place'] = 0
-l_sl_agent_config['frequency'] = None
+linear_sl_agent_config['frequency'] = None
 
 # 
 strategic_agent_config = {}
-strategic_agent_config['volume'] = None
-strategic_agent_config['terminal_time'] = None
-strategic_agent_config['when_to_place'] = 0
 strategic_agent_config['frequency'] = 20
 strategic_agent_config['market_volume'] = 1
 strategic_agent_config['limit_volume'] = 3
