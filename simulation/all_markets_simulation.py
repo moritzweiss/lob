@@ -19,7 +19,7 @@ from limit_order_book.limit_order_book import LimitOrderBook
 import numpy as np
 from gymnasium.spaces import Box
 import os
-from config.config import noise_agent_config, sl_agent_config, market_agent_config, rl_agent_config, l_sl_agent_config, strategic_agent_config
+from config.config import noise_agent_config, sl_agent_config, market_agent_config, rl_agent_config, linear_sl_agent_config, strategic_agent_config
 
 # TODO: test critical methods reward calculation and so on 
 # TODO: redo testing of limit order book 
@@ -35,6 +35,7 @@ class Market(gym.Env):
         - noise_step: counts the steps of the noise agent (we use this as event time) 
         - physical_time: counts the physical time based on exponential distribution 
         - lob: limit order book instance 
+        - seed 
         - action space
         - observation space 
         - drift: drift of the strategic agent. we add this manually to make training easier. this should be raplced with a proxy        
@@ -56,7 +57,6 @@ class Market(gym.Env):
         if config['execution_agent'] == 'market_agent':
             # use market agent config here 
             market_agent_config['volume'] = config['volume']
-            market_agent_config['terminal_time'] = config['terminal_time']
             self.execution_agent = MarketAgent(**market_agent_config)
         elif config['execution_agent'] == 'sl_agent':
             # use sl agent config here
@@ -66,10 +66,10 @@ class Market(gym.Env):
             self.execution_agent = SubmitAndLeaveAgent(**sl_agent_config)
         elif config['execution_agent'] == 'linear_sl_agent':
             # use linear sl agent config here
-            l_sl_agent_config['volume'] = config['volume']
-            l_sl_agent_config['terminal_time'] = config['terminal_time']
-            l_sl_agent_config['frequency'] = config['frequency']
-            self.execution_agent = LinearSubmitLeaveAgent(**l_sl_agent_config)
+            linear_sl_agent_config['volume'] = config['volume']
+            linear_sl_agent_config['terminal_time'] = config['terminal_time']
+            linear_sl_agent_config['frequency'] = config['frequency']
+            self.execution_agent = LinearSubmitLeaveAgent(**linear_sl_agent_config)
         elif config['execution_agent'] == 'rl_agent':
             # use rl config here 
             rl_agent_config['volume'] = config['volume']
@@ -83,26 +83,33 @@ class Market(gym.Env):
         # setting market environment 
         assert config['market_type'] in ['noise', 'flow', 'strategic'], f'Unknown type {config["market_type"]}'
         self.market_type = config['market_type']
-
-        # setting noise agent
-        noise_agent_config['rng'] = np.random.default_rng(config['seed'])
-        if config['market_type'] == 'noise':
-            noise_agent_config['imbalance_reaction'] = False
-            noise_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
-        else:
-            noise_agent_config['imbalance_reaction'] = True
-            noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
+        
+        # setting seed. do this somehow with worker index. explore later ! 
         # TODO: review whats happening here !! 
         # worker_index = getattr(config, 'worker_index', None)
         # if worker_index is not None:
         #     super().reset(seed=config['seed']+worker_index)
         # else:
         #     super().reset(seed=config['seed'])
+        rng = np.random.default_rng(config['seed'])
+        # print(f'the seed for this market is {config["seed"]}')
+
+        # setting noise agent
+        noise_agent_config['rng'] = rng
+        if config['market_type'] == 'noise':
+            noise_agent_config['imbalance_reaction'] = False
+            # noise_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
+            noise_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
+        else:
+            noise_agent_config['imbalance_reaction'] = True
+            # noise_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
+            # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
+            noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
         self.noise_agent = NoiseAgent(**noise_agent_config)
         
         # setting strategic agent
         if config['market_type'] == 'strategic':
-            strategic_agent_config['rng'] = np.random.default_rng(config['seed'])
+            strategic_agent_config['rng'] = rng
             self.strategic_agent = StrategicAgent(**strategic_agent_config)
         else:
             self.strategic_agent = None
@@ -152,7 +159,7 @@ class Market(gym.Env):
         super().reset(seed=seed)
         self.event_times = [0]
         self.physical_time = 0  
-        self.noise_step = -50 
+        self.noise_step = 0
         # reset agents, register, initialize 
         if self.strategic_agent is not None:
             self.strategic_agent.reset()
@@ -173,8 +180,8 @@ class Market(gym.Env):
         assert terminated == False
         assert reward == 0
         # run transitions
-        for _ in range(50):
-            self.single_transition()
+        # for _ in range(0):
+        #     self.single_transition()
         observation = self._get_observation()
         return observation, {}
     
@@ -197,11 +204,11 @@ class Market(gym.Env):
         for _ in range(100):
             reward, terminated = self.single_transition(action)
             total_reward += reward
-        if terminated: 
-            assert self.execution_agent.volume == 0, 'agent should have zero volume'
-            observation = self._get_observation()
-            return observation, total_reward, True, False, self.final_info()
-        elif self.noise_step < self.terminal_time:
+            if terminated: 
+                assert self.execution_agent.volume == 0, 'agent should have zero volume'
+                observation = self._get_observation()
+                return observation, total_reward, True, False, self.final_info()
+        if self.noise_step < self.terminal_time:
             observation = self._get_observation()
             return observation, total_reward, False, False, {}
         else:
@@ -272,14 +279,15 @@ class Market(gym.Env):
 
 
 if __name__ == '__main__': 
-    config = {'seed':2, 'market_type':'noise', 'execution_agent':'sl_agent', 'terminal_time':int(3e2), 'volume':40}  
+    config = {'seed':2, 'market_type':'noise', 'execution_agent':'sl_agent', 'terminal_time':int(1e2), 'volume':10}  
     print(config)
     M = Market(config)
     print('init is done')
     price_moves = []
-    for n in range(1):
+    physical_times = []
+    for n in range(30):
         r = 0 
-        print(f'episode {n}')        
+        # print(f'episode {n}')        
         observation, _ = M.reset()
         # assert observation in M.observation_space
         terminated = False 
@@ -301,19 +309,24 @@ if __name__ == '__main__':
             # print(f"info: {info['total_reward']}")
             # print(f'termindated: {terminated}')
         # print(f'info: {info}')
-        if info["total_reward"] > 1:
-            print(f'total reward: {info["total_reward"]}')
-            print(info)
+        # if info["total_reward"] > 1:
+        #     print(f'total reward: {info["total_reward"]}')
+        #     print(info)
+        # print(M.noise_step)
+        # print(M.physical_time)
+        physical_times.append(M.physical_time)
 
-    print(info)            
-    data, orders, market_orders = M.lob.log_to_df()
-    # use physical time 
-    # heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=200)
-    # use tick time 
-    heat_map(market_orders, data, event_times=market_orders.time, max_level=5, max_volume=40, scale=1000)
-    # plot_prices(level2=data, trades=orders, marker_size=200)
-    plt.tight_layout()
-    plt.savefig('heat.pdf')
+    print(f'average physical time {np.mean(physical_times)}')
+
+    # print(info)            
+    # data, orders, market_orders = M.lob.log_to_df()
+    # # use physical time 
+    # # heat_map(market_orders, data, event_times=M.event_times, max_level=5, max_volume=40, scale=200)
+    # # use tick time 
+    # heat_map(market_orders, data, event_times=market_orders.time, max_level=5, max_volume=40, scale=1000)
+    # # plot_prices(level2=data, trades=orders, marker_size=200)
+    # plt.tight_layout()
+    # plt.savefig('heat.pdf')
     # plt.show()
     # print(max(price_moves))
     # print(min(price_moves)) 
