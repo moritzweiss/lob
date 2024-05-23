@@ -7,7 +7,6 @@ import numpy as np
 from limit_order_book.limit_order_book import LimitOrder, MarketOrder, CancellationByPriceVolume, Cancellation
 from config.config import noise_agent_config
 
-
 class NoiseAgent(): 
     def __init__(self, rng, 
                  level,
@@ -183,6 +182,8 @@ class NoiseAgent():
             assert -1 <= imbalance <= 1, 'imbalance must be in [-1, 1]'
             pos = self.imbalance_factor*max(0, imbalance)
             neg = self.imbalance_factor*max(0, -imbalance)
+            # pos = max(0, imbalance)
+            # neg = max(0, -imbalance)
             # possible adjustments of the imbalance: 
             # imbalance = np.sign(imbalance)*np.power(np.abs(imbalance), 1/2)
             # imbalance = np.sign(imbalance)
@@ -196,11 +197,12 @@ class NoiseAgent():
             # adjust cancellation intensities
             # if imbalance = 1, price goes up --> cancel limit buy orders (bid)
             #
+            # c = 0.5
             bid_cancel_intensity = bid_cancel_intensity*(1+neg)
             ask_cancel_intensity = ask_cancel_intensity*(1+pos)
             # n = 30
-            # bid_cancel_intensity[:n] = bid_cancel_intensity[:n]*(1-imbalance)
-            # ask_cancel_intensity[:n] = ask_cancel_intensity[:n]*(1+imbalance)
+            # bid_cancel_intensity = bid_cancel_intensity*(1-imbalance)
+            # ask_cancel_intensity = ask_cancel_intensity*(1+imbalance)
             # bid_cancel_intensity[:n] = bid_cancel_intensity[:n]*(1-imbalance*self.damping_weights[:n])
             # ask_cancel_intensity[:n] = ask_cancel_intensity[:n]*(1+imbalance*self.damping_weights[:n])
             # weights = np.exp(-0.1*np.arange(L))
@@ -210,12 +212,13 @@ class NoiseAgent():
             # adjust limit order intensities
             # if I=1, price goes up --> more limit buy orders
             ##
+            # c = 0.5
             bid_limit_intensities = self.limit_intensities.copy()
             ask_limit_intensities = self.limit_intensities.copy()
             bid_limit_intensities = bid_limit_intensities*(1+pos)
             ask_limit_intensities = ask_limit_intensities*(1+neg)
-            # bid_limit_intensities[:n] = bid_limit_intensities[:n]*(1+imbalance)
-            # ask_limit_intensities[:n] = ask_limit_intensities[:n]*(1-imbalance)
+            # bid_limit_intensities = bid_limit_intensities*(1+imbalance)
+            # ask_limit_intensities = ask_limit_intensities*(1-imbalance)
             # bid_limit_intensities = bid_limit_intensities*(1+imbalance*(2*weights-1))
             # ask_limit_intensities = ask_limit_intensities*(1-imbalance*(2*weights-1))
             # imbalance*bid_limit_intensities[:n]*self.damping_weights[:n]
@@ -287,8 +290,6 @@ class NoiseAgent():
         # order_list.append(order)
 
         return order_list
-
-
 
 class ExecutionAgent():
     """
@@ -447,10 +448,10 @@ class SubmitAndLeaveAgent(ExecutionAgent):
 
 class LinearSubmitLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, terminal_time, frequency) -> None:
+    def __init__(self, volume, when_to_place, terminal_time, frequency) -> None:
         super().__init__(volume=volume, agent_id='linear_sl_agent')
         self.terminal_time = terminal_time
-        self.when_to_place = 0 
+        self.when_to_place = when_to_place
         self.frequency = frequency
         steps = int(terminal_time/frequency)
         assert volume % steps == 0 or volume < steps
@@ -458,6 +459,10 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         if volume >= steps:
             self.volume_slice = int(self.initial_volume/steps)
             assert self.volume_slice * steps == volume
+            self.submit_and_leave = False
+        else:
+            # hacky method to fall back on submit and leave 
+            self.submit_and_leave = True
         return None 
                         
     def generate_order(self, time, lob):
@@ -465,9 +470,15 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         assert self.active_volume >= 0 
         if time == self.when_to_place:
             self.reference_bid_price = lob.get_best_price('bid')
+            if self.submit_and_leave:
+                limit_price = lob.get_best_price('bid')+1
+                return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
         if time % self.frequency == 0 and time < self.terminal_time and time >= self.when_to_place:
-            limit_price = lob.get_best_price('bid')+1
-            return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice, time=time)]
+            if self.submit_and_leave:
+                pass
+            else:
+                limit_price = lob.get_best_price('bid')+1
+                return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice, time=time)]
         else:
             return None
     
