@@ -1,10 +1,11 @@
 import sys
 import os 
-current = os.path.dirname(os.path.realpath(__file__))
-parent = os.path.dirname(current)
-sys.path.append(parent)
+# do not need this once we have https://stackoverflow.com/questions/4757178/how-do-you-set-your-pythonpath-in-an-already-created-virtualenv/47184788#47184788
+# current = os.path.dirname(os.path.realpath(__file__))
+# parent = os.path.dirname(current)
+# sys.path.append(parent)
 from limit_order_book.limit_order_book import LimitOrder, MarketOrder, CancellationByPriceVolume, Cancellation, LimitOrderBook
-from agents import ExecutionAgent
+from agents import ExecutionAgent, LinearSubmitLeaveAgent
 
 # import numpy as np
 # from config.config import config
@@ -161,6 +162,46 @@ def test_dynamic():
     assert (EA.cummulative_reward - 1) < 1e-10
     return None 
     
+def test_linear_sl_agent():
+    # pass
+    volume = 20
+    LSL = LinearSubmitLeaveAgent(volume=volume, when_to_place=0, terminal_time=10, frequency=1)
+    LOB = LimitOrderBook(list_of_agents=['noise_agent', LSL.agent_id], level=5, only_volumes=False)
+    # initialize the bid 
+    order_list = []
+    order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100, volume=volume, time=0))
+    LOB.process_order_list(order_list)
+    # agent 
+    order = LSL.generate_order(LOB.time, LOB)
+    msg = LOB.process_order_list(order)
+    LSL.update_position_from_message_list(msg)
+    # market order 
+    order_list = []
+    order_list.append(MarketOrder(side='ask', agent_id='noise_agent', volume=2, time=0))
+    msg = LOB.process_order_list(order_list)
+    LSL.update_position_from_message_list(msg)
+    for time in range(1,11,1):
+        # time runs through 1,2, ..., 10
+        # establish new bid price cancel and cancel old bid 
+        order_list = []
+        order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100+time, volume=volume, time=time))
+        order_list.append(CancellationByPriceVolume(side='bid', agent_id='noise_agent', price=100+time-1, volume=volume, time=time))
+        msg = LOB.process_order_list(order_list)
+        # l_sl agent sends order 
+        order = LSL.generate_order(LOB.time, LOB)
+        if order is not None:
+            msg = LOB.process_order_list(order)
+            LSL.update_position_from_message_list(msg)
+        # market order which fills l_sl 
+        order_list = []
+        order_list.append(MarketOrder(side='ask', agent_id='noise_agent', volume=2, time=time))
+        msg = LOB.process_order_list(order_list)
+        reward, terminated = LSL.update_position_from_message_list(msg)
+        if terminated:
+            break
+    assert LSL.cummulative_reward == sum([((100+1+time)*2 - 2*100)/20 for time in range(10)])
+    pass
+
 
 
 test_market_order()
@@ -169,5 +210,5 @@ test_limit_order(terminated=False)
 sell_remaining()
 test_cancellation()
 test_dynamic()
-
+test_linear_sl_agent()
 
