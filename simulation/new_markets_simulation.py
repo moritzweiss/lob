@@ -3,16 +3,13 @@ from limit_order_book.limit_order_book import LimitOrderBook
 import numpy as np
 from config.config import noise_agent_config
 from queue import PriorityQueue
-
-
-import heapq
 from dataclasses import dataclass, field
 from typing import Any
 
-@dataclass(order=True)
-class PrioritizedItem:
-    priority: int
-    item: Any = field(compare=False)
+# @dataclass(order=True)
+# class PrioritizedItem:
+#     priority: int
+#     item: Any = field(compare=False)
 
 # Create a list to be used as a priority queue
 # pq = PriorityQueue()
@@ -26,13 +23,15 @@ class PrioritizedItem:
 #     print(out)
 
 
-
 # initialize agents and limit order book 
 noise_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
+noise_agent_config['start_time'] = 0 
 NA = NoiseAgent(**noise_agent_config)
-LSL = LinearSubmitLeaveAgent(when_to_place=0, frequency=100, terminal_time=1000, volume=100)
-SA = StrategicAgent(frequency=10, offset=5, market_volume=1, limit_volume=1, rng=np.random.default_rng(0))
-LOB = LimitOrderBook(list_of_agents=[NA.agent_id, LSL], level=30, only_volumes=False)
+EA = LinearSubmitLeaveAgent(start_time=0, time_delta=100, terminal_time=1000, volume=10)
+SA = StrategicAgent(start_time=0, time_delta=50, market_volume=1, limit_volume=1, rng=np.random.default_rng(0))
+# this reset
+SA.reset_direction()
+LOB = LimitOrderBook(list_of_agents=[NA.agent_id, EA.agent_id, SA.agent_id], level=30, only_volumes=False)
 
 
 # initialize LOB 
@@ -47,59 +46,73 @@ pq = PriorityQueue()
 
 # pq.put((0, 1,'task 1'))
 # pq.put((0, 0, 'task 2'))
-# pq.put((1, 2, 'task 3'))
+# pq.put((1, 2, 'task 3')) 
 # while not pq.empty():
 #     priority, _, task = pq.get()
 #     print(f"Processing {task} with priority {priority}")
 
-# initial times for all agents 
-time = 0 
-pq.put(time, 0, 'agent_action')
-pq.put(time, 1, 'strategic_agent')
-order, waiting_time = NA.sample_order(LOB, time=time)
+
+# initialize event queue 
+# execution 
+out = EA.initial_event()
+pq.put(out)
+# noise, first time to act 
+NA.generate_order(LOB, time=NA.start_time)
+out = NA.new_event(NA.start_time, 'noise_agent_action')
+pq.put(out)
+# strategic. first time to act 
+out = SA.initial_event()
+pq.put(out)
 # should store the noise order somewhere. maybe inside the NA class 
-pq.put(time+waiting_time, 0, 'noise_agent')
+
+# while not pq.empty():
+#     t, p, event = pq.get()
+#     print(f"event={event}, time={t}, p={p}")
+
 
 # 
 terminated = False
 observation = False
 while not terminated and not observation: 
-    time, _, task = pq.get()
-    if task == 'execution_agent_action':
-        # process order 
-        orders =LSL.generate_order(time, LOB)
+    time, _, event = pq.get()
+    # print(f'time={time}')
+    # print(f'event={event}')
+    if event == 'execution_agent_action':
+        orders = EA.generate_order(time, LOB)
         msgs = LOB.process_order_list(orders)
-        LSL.update_position_from_message_list(msgs)
-        # set next observation time 
-        pq.put(100, 0, 'execution_agent_observation')
-    elif task == 'execution_agent_observation':
-        observation = True 
-        pq.put(time, 0, 'execution_agent_action')
-        # exit while loop 
-    elif task == 'strategic_agent':
+        rewards, terminated = EA.update_position_from_message_list(msgs)
+        if terminated:
+            break
+        else:            
+            out = EA.new_event(time, event)
+            pq.put(out)
+    elif event == 'execution_agent_observation':
+        out = EA.new_event(time, event)
+        pq.put(out)
+        break 
+    elif event == 'noise_agent_action':
+        msgs = LOB.process_order_list(NA.current_order)
+        rewards, terminated = EA.update_position_from_message_list(msgs)
+        # safety check
+        NA.current_order = None 
+        NA.waiting_time = None 
+        if terminated:
+            break
+        else:
+            # updates NA.current_order, NA.waiting_time internally 
+            NA.generate_order(LOB, time=time)
+            out = NA.new_event(time, event)
+            pq.put(out)
+    elif event == 'strategic_agent_action':
         orders = SA.generate_order(LOB, time=time)
         msgs = LOB.process_order_list(orders)
-        LSL.update_position_from_message_list(msgs)
-        # new stratetegic agent time  
-        # pq.put(, 'strategic_agent')
-    elif task == 'noise_agent':
-        # 1) process current order at current time 
-        # 2) check for terminal condition 
-        # 3) generate new order and waiting time 
-        order, waiting_time = NA.sample_order(LOB, time=time)
-        # save next order in NA class 
-        pq.put(time+waiting_time, 2, 'noise_agent')
+        rewards, terminated = EA.update_position_from_message_list(msgs)
+        if terminated:
+            break
+        else:
+            out = SA.new_event(time, event)
+            pq.put(out)
+    else:
+        raise ValueError(f'event={event} not recognized')
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+print(f'total reward: {EA.cummulative_reward}')
