@@ -56,35 +56,38 @@ noise_agent_config['rng'] = np.random.default_rng(0)
 noise_agent_config['initial_bid'] = 1000
 noise_agent_config['initial_ask'] = 1001
 
+# 
+noise_agent_config['start_time'] = 0 
+
 # sl 
 sl_agent_config = {}
 sl_agent_config['volume'] = None
 sl_agent_config['terminal_time'] = None
-sl_agent_config['when_to_place'] = 0 
+sl_agent_config['start_time'] = 0 
 
 # linear sl 
 linear_sl_agent_config = {}
 linear_sl_agent_config['volume'] = None
 linear_sl_agent_config['terminal_time'] = None
-linear_sl_agent_config['when_to_place'] = 0
-linear_sl_agent_config['frequency'] = None
+linear_sl_agent_config['start_time'] = 0
+linear_sl_agent_config['time_delta'] = 500
 
 # market 
 market_agent_config = {}
 market_agent_config['volume'] = None
-market_agent_config['when_to_place'] = 0
+market_agent_config['start_time'] = 0
 
 # rl
 rl_agent_config = {}
 rl_agent_config['volume'] = None
 rl_agent_config['terminal_time'] = None
-rl_agent_config['when_to_place'] = 0
-linear_sl_agent_config['frequency'] = None
+rl_agent_config['start_time'] = 0
+rl_agent_config['time_delta'] = 500
 
-# 
+# strategic
 strategic_agent_config = {}
-strategic_agent_config['frequency'] = 20
+strategic_agent_config['start_time'] = 10
+strategic_agent_config['time_delta'] = 50
 strategic_agent_config['market_volume'] = 1
 strategic_agent_config['limit_volume'] = 3
-strategic_agent_config['offset'] = 19
 strategic_agent_config['rng'] = None 

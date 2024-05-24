@@ -40,7 +40,7 @@ def heat_map_plot(n_time_steps=1, rng=default_rng(0), initial_shape=50, imbalanc
     orders = NA.initialize(time=0)
     LOB.process_order_list(orders)
     for time in range(n_time_steps):
-        order, _ = NA.sample_order(LOB, time=time)
+        order, _ = NA.generate_order(LOB, time=time)
         LOB.process_order(order)
     data, orders, market_orders = LOB.log_to_df()
     heat_map(trades=market_orders, level2=data, event_times=data.time, max_level=7, scale=150, max_volume=40)

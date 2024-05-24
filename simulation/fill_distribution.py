@@ -42,7 +42,7 @@ class Market(gym.Env):
         # placement by strategic investor  
         # 100 noise transitions 
         for _ in range(100):
-            order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
+            order = self.noise_agent.generate_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
             self.lob.process_order(order)
             self.time += 1
         if self.side == 'ask':
@@ -57,7 +57,7 @@ class Market(gym.Env):
     
     def step(self):
         terminated = False
-        order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
+        order = self.noise_agent.generate_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         self.lob.process_order(order)
         # print(order.type)
         if order.type == 'market':

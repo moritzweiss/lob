@@ -165,7 +165,7 @@ def test_dynamic():
 def test_linear_sl_agent():
     # pass
     volume = 20
-    LSL = LinearSubmitLeaveAgent(volume=volume, when_to_place=0, terminal_time=10, frequency=1)
+    LSL = LinearSubmitLeaveAgent(volume=volume, start_time=0, terminal_time=10, frequency=1)
     LOB = LimitOrderBook(list_of_agents=['noise_agent', LSL.agent_id], level=5, only_volumes=False)
     # initialize the bid 
     order_list = []
