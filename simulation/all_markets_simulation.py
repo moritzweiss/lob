@@ -162,7 +162,7 @@ class Market(gym.Env):
         self.noise_step = 0
         # reset agents, register, initialize 
         if self.strategic_agent is not None:
-            self.strategic_agent.reset()
+            self.strategic_agent.reset_direction()
             if self.strategic_agent.direction == 'sell':
                 self.drift = -1
             elif self.strategic_agent.direction == 'buy':
@@ -226,7 +226,7 @@ class Market(gym.Env):
             reward, terminated = self.place_and_update(order)
             total_reward += reward
         # noise agent 
-        order, waiting_time = self.noise_agent.sample_order(self.lob, self.noise_step)
+        order, waiting_time = self.noise_agent.generate_order(self.lob, self.noise_step)
         self.physical_time += waiting_time
         self.event_times.append(self.physical_time)
         reward, terminated = self.place_and_update([order])
