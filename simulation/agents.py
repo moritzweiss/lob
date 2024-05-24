@@ -21,7 +21,8 @@ class NoiseAgent():
                  unit_volume,
                  damping_factor, imbalance_reaction, imbalance_factor,                 
                  initial_bid, 
-                 initial_ask 
+                 initial_ask, 
+                 start_time
                  ):
         """"    
         Parameters:
@@ -39,7 +40,7 @@ class NoiseAgent():
         volume_distribtion: half normal or log normal 
         rng: np.random number generator instance                                 
         """
-
+        
         self.damping_factor = damping_factor        
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
         self.imbalance_reaction = imbalance_reaction
@@ -76,6 +77,11 @@ class NoiseAgent():
             self.initial_shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf)      
 
         self.agent_id = 'noise_agent'
+
+        # 
+        self.current_order = None 
+        self.waiting_time = None 
+        self.start_time = start_time
 
         return None  
     
@@ -119,8 +125,7 @@ class NoiseAgent():
 
         return volume
 
-
-    def sample_order(self, lob, time):
+    def generate_order(self, lob, time):
         """
         This methods samples an order and a time to execute this order 
 
@@ -247,10 +252,10 @@ class NoiseAgent():
                 probability = ask_limit_intensities/np.sum(ask_limit_intensities)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
-            order = LimitOrder(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time) 
+            order = LimitOrder(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time+waiting_time) 
 
         elif action == 'market':
-            order = MarketOrder(agent_id=self.agent_id, side=side, volume=volume, time=time)
+            order = MarketOrder(agent_id=self.agent_id, side=side, volume=volume, time=time+waiting_time)
         
         elif action == 'cancellation':
             if side == 'bid':
@@ -261,9 +266,12 @@ class NoiseAgent():
                 probability = ask_cancel_intensity/np.sum(ask_cancel_intensity)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
-            order = CancellationByPriceVolume(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time)
-                            
-        return order, waiting_time 
+            order = CancellationByPriceVolume(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time+waiting_time)
+
+        self.current_order = [order]
+        self.waiting_time = waiting_time
+        
+        return [order], waiting_time 
 
     def cancel_far_out_orders(self, lob, time):        
         # ToDo: Could add this as a function to the order book (as an order type)
@@ -290,6 +298,12 @@ class NoiseAgent():
         # order_list.append(order)
 
         return order_list
+
+    def new_event(self, time, event):
+        if event == 'noise_agent_action':
+            return (time+self.waiting_time, 1, 'noise_agent_action')
+        else:
+            raise
 
 class ExecutionAgent():
     """
@@ -407,14 +421,14 @@ class ExecutionAgent():
 
 class MarketAgent(ExecutionAgent):
 
-    def __init__(self, volume, when_to_place) -> None:
+    def __init__(self, volume, start_time) -> None:
         super().__init__(volume, 'market_agent')
-        self.when_to_place = when_to_place
+        self.start_time = start_time
                     
     def generate_order(self, time, lob):
         assert self.active_volume >= 0 
         assert self.volume >= 0
-        if time == self.when_to_place:
+        if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid')
             return [MarketOrder(self.agent_id, side='bid', volume=self.volume, time=time)]
         else:
@@ -425,16 +439,16 @@ class MarketAgent(ExecutionAgent):
 
 class SubmitAndLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, when_to_place, terminal_time) -> None:
+    def __init__(self, volume, start_time, terminal_time) -> None:
         super().__init__(volume, 'sl_agent')
         self.terminal_time = terminal_time
-        self.when_to_place = when_to_place
+        self.start_time = start_time
                         
     def generate_order(self, time, lob):
         assert self.volume >= 0
         assert self.active_volume >= 0 
         assert time <= self.terminal_time        
-        if time == self.when_to_place:
+        if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid')
             limit_price = lob.get_best_price('bid')+1
             # print(f'reference bid price is {self.reference_bid_price}')
@@ -448,51 +462,78 @@ class SubmitAndLeaveAgent(ExecutionAgent):
 
 class LinearSubmitLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, when_to_place, terminal_time, frequency) -> None:
+    def __init__(self, volume, start_time, time_delta, terminal_time) -> None:
         super().__init__(volume=volume, agent_id='linear_sl_agent')
+        assert start_time < terminal_time
+        assert time_delta < terminal_time, 'time delta must be less than terminal time'
+        assert terminal_time % time_delta == 0, 'terminal time must be divisible by time delta'
+        time_steps = terminal_time/time_delta
+        assert 0 < volume < time_steps or volume % time_steps == 0, 'volume must be divisible by time delta or volume < time delta'
         self.terminal_time = terminal_time
-        self.when_to_place = when_to_place
-        self.frequency = frequency
-        steps = int(terminal_time/frequency)
-        assert volume % steps == 0 or volume < steps
-        assert self.when_to_place < self.terminal_time
-        if volume >= steps:
-            self.volume_slice = int(self.initial_volume/steps)
-            assert self.volume_slice * steps == volume
+        self.start_time = start_time
+        self.time_delta = time_delta
+        self.volume_slice = volume/time_steps
+        # self.action_times = np.arange(start_time, terminal_time+time_delta, time_delta)
+        if volume >= time_steps:
+            self.volume_slice = int(volume/time_steps)
+            assert self.volume_slice * time_steps == volume
             self.submit_and_leave = False
         else:
-            # hacky method to fall back on submit and leave 
             self.submit_and_leave = True
         return None 
                         
     def generate_order(self, time, lob):
-        assert self.volume >= 0
-        assert self.active_volume >= 0 
-        if time == self.when_to_place:
-            self.reference_bid_price = lob.get_best_price('bid')
-            if self.submit_and_leave:
+        assert self.volume > 0 
+        assert time >= self.start_time
+        # (205-5)%100 == 0 
+        if (time-self.start_time)%self.time_delta == 0:
+            if time == self.start_time:
+                self.reference_bid_price = lob.get_best_price('bid')
                 limit_price = lob.get_best_price('bid')+1
-                return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
-        if time % self.frequency == 0 and time < self.terminal_time and time >= self.when_to_place:
-            if self.submit_and_leave:
-                pass
+                if self.submit_and_leave:
+                    return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
+                else:
+                    return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice, time=time)]
+            elif time < self.terminal_time:
+                if self.submit_and_leave:
+                    pass
+                else:
+                    limit_price = lob.get_best_price('bid')+1
+                    return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice, time=time)]
+            elif time == self.terminal_time:
+                return self.sell_remaining_position(lob, time)
             else:
-                limit_price = lob.get_best_price('bid')+1
-                return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.volume_slice, time=time)]
+                raise ValueError('time is in execution agent order generation is wrong')
         else:
+            # in the current set up, this should not happen, because agent should only be triggered at the right times 
+            # could also raise an error here 
             return None
     
     def get_observation(self, time, lob):
         return None 
+    
+    def new_event(self, time, event):
+        assert time >= self.start_time
+        assert (time - self.start_time) % self.time_delta == 0, 'time-start_time must be divisible by time delta'
+        assert self.volume > 0 
+        if event == 'execution_agent_action':
+            # we just took an action, what is the next event ? 
+            # (time, priority, task)
+            return (time+self.time_delta, 0, 'execution_agent_action')
+        else:
+            raise ValueError(f'Unknown event {event}')
+    
+    def initial_event(self):
+        return (self.start_time, 0, 'execution_agent_action')
 
 class RLAgent(ExecutionAgent):
     """
         - this agent takes in an action and then generates an order
     """
-    def __init__(self, volume, terminal_time, when_to_place, frequency) -> None:
+    def __init__(self, volume, terminal_time, start_time, frequency) -> None:
         super().__init__(volume, 'rl_agent')
         self.orders_within_range = set()
-        self.when_to_place = when_to_place
+        self.start_time = start_time
         self.terminal_time = terminal_time
         self.frequency = frequency
         
@@ -502,10 +543,10 @@ class RLAgent(ExecutionAgent):
         - generate list of orders from an action
         - return the list of orders
         """
-        if time == self.when_to_place:
+        if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid') 
         
-        if time >= self.when_to_place and time < self.terminal_time and time % self.frequency == 0:
+        if time >= self.start_time and time < self.terminal_time and time % self.frequency == 0:
 
             best_bid = lob.get_best_price('bid')
 
@@ -646,10 +687,10 @@ class StrategicAgent():
     - just sends limit and market orders at some frequency
     - we do not keep track of the agents position 
     """
-    def __init__(self, frequency, market_volume, limit_volume, rng, offset) -> None:
-        assert 0 <= offset < frequency, 'offset must be in {0,1, ..., frequency-1}'        
-        self.frequency = frequency
-        self.offset = offset 
+    def __init__(self, start_time, time_delta, market_volume, limit_volume, rng) -> None:
+        # assert 0 <= offset < frequency, 'offset must be in {0,1, ..., frequency-1}'        
+        self.start_time = start_time
+        self.time_delta = time_delta
         self.market_order_volume = market_volume
         self.limit_order_volume = limit_volume
         self.agent_id = 'strategic_agent'
@@ -658,7 +699,7 @@ class StrategicAgent():
         return None 
     
     def generate_order(self, lob, time):        
-        if time % self.frequency == self.offset:
+        if (time - self.start_time) % self.time_delta == 0:
             if self.direction == 'sell':                
                 limit_price = lob.get_best_price('bid')+1
                 order_list = []
@@ -674,9 +715,18 @@ class StrategicAgent():
             else:
                 raise ValueError(f'direction must be either buy or sell, got {self.direction}')
         else:
+            # in the current set up this should never happen ! 
             return None 
-
         
-    def reset(self):
+    def reset_direction(self):
         self.direction = self.rng.choice(['buy', 'sell'])
         return None
+    
+    def new_event(self, time, event):
+        if event == 'strategic_agent_action':
+            return (time+self.time_delta, 2, 'strategic_agent_action')
+        else:
+            raise ValueError(f'Unknown event {event}')
+    
+    def initial_event(self):
+        return (self.start_time, 2, 'strategic_agent_action')
