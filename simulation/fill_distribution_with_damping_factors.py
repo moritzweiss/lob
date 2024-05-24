@@ -52,7 +52,7 @@ class Market(gym.Env):
     
     def step(self):
         terminated = False
-        order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
+        order = self.noise_agent.generate_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         # print(order.type)
         out = self.lob.process_order(order)
         if out.type == 'market':
