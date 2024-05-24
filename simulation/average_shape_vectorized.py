@@ -39,7 +39,7 @@ class Market(gym.Env):
         # process order 
         truncated = terminated = False
         # order = sample order 
-        order = self.noise_agent.sample_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
+        order = self.noise_agent.generate_order(self.lob.data.best_bid_prices[-1], self.lob.data.best_ask_prices[-1], self.lob.data.bid_volumes[-1], self.lob.data.ask_volumes[-1])
         # note: logging or note makes a big time difference 
         self.lob.process_order(order)      
         orders = self.noise_agent.cancel_far_out_orders(lob=self.lob)
