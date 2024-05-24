@@ -30,7 +30,7 @@ def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_
     orders = NA.initialize(time=0)
     LOB.process_order_list(orders)
     for time in range(n_time_steps):
-        order, _ = NA.sample_order(LOB, time=time)
+        order, _ = NA.generate_order(LOB, time=time)
         LOB.process_order(order)
         LOB.clear_orders(30)
     T = len(LOB.data.bid_volumes)
