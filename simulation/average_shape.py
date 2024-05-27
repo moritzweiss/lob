@@ -19,19 +19,22 @@ import seaborn as sns
 from config.config import noise_agent_config
 
 
-def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False, imbalance_factor=3):
+def average_shape(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False, imbalance_factor=3):
     noise_agent_config['initial_shape'] = initial_shape
     noise_agent_config['damping_factor'] = damping_factor
     noise_agent_config['imbalance_reaction'] = imbalance
     noise_agent_config['imbalance_factor'] = imbalance_factor
     noise_agent_config['rng'] = rng    
+    noise_agent_config['unit_volume'] = True
     NA = NoiseAgent(**noise_agent_config)
     LOB = LimitOrderBook(list_of_agents=[NA.agent_id], level=30, only_volumes=True)
     orders = NA.initialize(time=0)
     LOB.process_order_list(orders)
-    for time in range(n_time_steps):
-        order, _ = NA.generate_order(LOB, time=time)
-        LOB.process_order(order)
+    t = 0
+    for _ in range(n_steps):
+        order = NA.generate_order(LOB, time=t)
+        t += NA.waiting_time
+        LOB.process_order_list(order)
         LOB.clear_orders(30)
     T = len(LOB.data.bid_volumes)
     bid_volumes = LOB.data.bid_volumes[-int(T/2):][::1000]
@@ -51,34 +54,36 @@ def average_shape(n_time_steps=1, rng=default_rng(0), initial_shape=50, damping_
     total_trades = np.array(LOB.data.market_buy[-int(T/2):])+np.array(LOB.data.market_sell[-int(T/2):])    
     window = np.lib.stride_tricks.sliding_window_view(total_trades, window_shape=1000)
     total_trades = np.sum(window, axis=-1)
-    return bid_volumes, ask_volumes, midp_diff, midp, window.sum(axis=-1)
+    average_time_step = np.mean(np.diff(LOB.data.time_stamps[-int(T/2):]))
+    return bid_volumes, ask_volumes, midp_diff, midp, window.sum(axis=-1), average_time_step
 
 def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance, imbalance_factor=3):
     samples_per_cpu = int(n_samples/n_cpus)
     with Pool(n_cpus) as p:
         out = p.starmap(average_shape, [(samples_per_cpu, default_rng(seed), initial_shape, damping_factor, imbalance, imbalance_factor) for seed in range(n_cpus)])    
-    bid_volumes, ask_volumes, midp_diff, midp, trades = zip(*out)
+    bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = zip(*out)
     bid_volumes = list(itertools.chain.from_iterable(bid_volumes))
     ask_volumes = list(itertools.chain.from_iterable(ask_volumes))
     midp_diff = list(itertools.chain.from_iterable(midp_diff))
     trades = list(itertools.chain.from_iterable(trades))
-    return bid_volumes, ask_volumes, midp_diff, trades
+    average_time_step = list(average_time_step)
+    return bid_volumes, ask_volumes, midp_diff, trades, average_time_step
 
 if __name__ == '__main__':
-    # average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
+    average_shape(n_steps=int(2e3), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
     # bidv0, askv0, midp0, mp = mp_rollout(N, 50, 1, 0, True)
     # bidv5, askv5, midp5 = mp_rollout(N, 50, 1, 0.5, True)
     if True: 
-        N = int(1e5)
-        bidv, askv, midp_diff, midp, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=False)
-        bidv_imb, askv_imb, midp_diff_imb, midp_imb, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=2.0, imbalance=True, imbalance_factor=3)
+        N = int(1e4)
+        bidv, askv, midp_diff, midp, _, _  = average_shape(n_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=False)
+        bidv_imb, askv_imb, midp_diff_imb, midp_imb, _, _ = average_shape(n_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=2.0, imbalance=True, imbalance_factor=3)
         # bidv_imb_5, askv_imb_5, midp_diff_imb_5, midp_imb_5, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
         # bidv_imb_7, askv_imb_7, midp_diff_imb_7, midp_imb_7, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=True)
         plt.figure(figsize=(10, 6))
         plt.xlim(0, len(midp))
         plt.grid(True)
         plt.plot(midp, label='Noise')
-        plt.plot(midp_imb, label='Noise+Flow, c=1')
+        plt.plot(midp_imb, label='Noise+Flow')
         # plt.plot(midp_imb_5, label='Noise+Flow, c=0.5')
         # plt.plot(midp_imb_7, label='Noise+Flow, c=0.75')
         plt.legend()
@@ -88,14 +93,16 @@ if __name__ == '__main__':
         N = int(1e6)
         # damping_factor = 0.5 
         start_time = timeit.default_timer()
-        bidv, askv, midp_diff, trades = mp_rollout(N, 60, 1, 0, False)
+        bidv, askv, midp_diff, trades, average_time_step = mp_rollout(N, 60, 1, 0, False)
         # print(np.nanmean(bidv, axis=0))
         np.savez('initial_shape/noise_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-        bidv_imb, akv_imb, midp_diff_imb, trades_imb = mp_rollout(N, 60, 1, damping_factor=0.75, imbalance=True)
+        bidv_imb, akv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(N, 60, 1, damping_factor=0.75, imbalance=True)
         # bidv_imb_5, askv_imb_5, midp_diff_imb_5, trades_imb_5 = mp_rollout(N, 50, 10, damping_factor=0.5, imbalance=True)
         # bidv_imb_7, askv_imb_7, midp_diff_imb_7, trades_imb_7 = mp_rollout(N, 50, 10, damping_factor=0.75, imbalance=True)
         np.savez('initial_shape/noise_flow_75_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
         end_time = timeit.default_timer()
+        print(f"average time step noise = {np.mean(average_time_step)}")
+        print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
         print(f"Execution time: {end_time - start_time} seconds")
     if True: 
         # bidv_imb, akv_imb, midp_diff_imb, trades_imb = mp_rollout(N, 50, 10, damping_factor=1.0, imbalance=False, imbalance_factor=1)

@@ -151,11 +151,11 @@ class NoiseAgent():
             else:
                 # bid is nan, ask is not nan
                 order = LimitOrder(agent_id=self.agent_id, side='bid', price=best_ask_price-1, volume=self.initial_shape[0], time=time)
-            return order, 0
+            return [order]
         if np.isnan(best_ask_price):
             # ask is nan, bid is not nan 
             order = LimitOrder(agent_id=self.agent_id, side='ask', price=best_bid_price+1, volume=self.initial_shape[0], time=time)
-            return order, 0
+            return [order]
 
         assert len(bid_volumes) == len(ask_volumes), 'bid and ask volumes must have the same length'
         assert np.all(bid_volumes >= 0), 'All entries of bid volumes must be >= 0'
@@ -234,7 +234,8 @@ class NoiseAgent():
 
         probability = np.array([market_sell_intensity, market_buy_intensity, np.sum(bid_limit_intensities), np.sum(ask_limit_intensities), np.sum(bid_cancel_intensity), np.sum(ask_cancel_intensity)])        
         assert np.all(probability >= 0), 'all probabilities must be > 0'
-        waiting_time = self.np_random.exponential(np.sum(probability))
+        waiting_time = self.np_random.exponential(1/np.sum(probability))
+        self.waiting_time = waiting_time
         # waiting_time = 1 
 
         probability = probability/np.sum(probability)
@@ -252,10 +253,10 @@ class NoiseAgent():
                 probability = ask_limit_intensities/np.sum(ask_limit_intensities)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
-            order = LimitOrder(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time+waiting_time) 
+            order = LimitOrder(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time) 
 
         elif action == 'market':
-            order = MarketOrder(agent_id=self.agent_id, side=side, volume=volume, time=time+waiting_time)
+            order = MarketOrder(agent_id=self.agent_id, side=side, volume=volume, time=time)
         
         elif action == 'cancellation':
             if side == 'bid':
@@ -266,12 +267,9 @@ class NoiseAgent():
                 probability = ask_cancel_intensity/np.sum(ask_cancel_intensity)
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
-            order = CancellationByPriceVolume(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time+waiting_time)
+            order = CancellationByPriceVolume(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time)
 
-        self.current_order = [order]
-        self.waiting_time = waiting_time
-        
-        return [order], waiting_time 
+        return [order]
 
     def cancel_far_out_orders(self, lob, time):        
         # ToDo: Could add this as a function to the order book (as an order type)
@@ -300,10 +298,19 @@ class NoiseAgent():
         return order_list
 
     def new_event(self, time, event):
+        assert self.waiting_time is not None 
+        waiting_time = self.waiting_time
+        self.waiting_time = None
         if event == 'noise_agent_action':
-            return (time+self.waiting_time, 1, 'noise_agent_action')
+            return (time+waiting_time, 1, 'noise_agent_action')
         else:
             raise
+    
+    def initial_event(self, LOB):
+        assert self.waiting_time is None 
+        # this sets self.waiting_time 
+        self.generate_order(LOB, self.start_time)
+        return (self.start_time+self.waiting_time, 1, 'noise_agent_action')
 
 class ExecutionAgent():
     """
@@ -436,6 +443,13 @@ class MarketAgent(ExecutionAgent):
     
     def get_observation(self, time, lob):
         return None 
+    
+    def new_event(self, time, event):
+        # should never happen, raise error if it does 
+        raise ValueError('market agent only acts once')
+
+    def initial_event(self):
+        return (self.start_time, 0, 'execution_agent_action')
 
 class SubmitAndLeaveAgent(ExecutionAgent):
 
@@ -447,18 +461,31 @@ class SubmitAndLeaveAgent(ExecutionAgent):
     def generate_order(self, time, lob):
         assert self.volume >= 0
         assert self.active_volume >= 0 
-        assert time <= self.terminal_time        
+        assert 0 <= time <= self.terminal_time        
         if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid')
             limit_price = lob.get_best_price('bid')+1
             # print(f'reference bid price is {self.reference_bid_price}')
             # print(f'placing limit order at {limit_price}')            
             return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
+        elif time == self.terminal_time:
+            return self.sell_remaining_position(lob, time)
         else:
-            return None
+            raise ValueError('input time in execution agent order generation is wrong')
     
     def get_observation(self, time, lob):
         return None 
+    
+    def new_event(self, time, event):
+        assert time == self.start_time
+        assert self.volume > 0 
+        if event == 'execution_agent_action':
+            return (self.terminal_time, 0, 'execution_agent_action')
+        else:
+            raise ValueError(f'Unknown event {event}')
+    
+    def initial_event(self):
+        return (self.start_time, 0, 'execution_agent_action')
 
 class LinearSubmitLeaveAgent(ExecutionAgent):
 
@@ -513,13 +540,17 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         return None 
     
     def new_event(self, time, event):
+        assert time <= self.terminal_time
         assert time >= self.start_time
         assert (time - self.start_time) % self.time_delta == 0, 'time-start_time must be divisible by time delta'
         assert self.volume > 0 
         if event == 'execution_agent_action':
             # we just took an action, what is the next event ? 
             # (time, priority, task)
-            return (time+self.time_delta, 0, 'execution_agent_action')
+            if self.submit_and_leave:
+                return (self.terminal_time, 0, 'execution_agent_action')
+            else:
+                return (time+self.time_delta, 0, 'execution_agent_action')
         else:
             raise ValueError(f'Unknown event {event}')
     
@@ -530,14 +561,13 @@ class RLAgent(ExecutionAgent):
     """
         - this agent takes in an action and then generates an order
     """
-    def __init__(self, volume, terminal_time, start_time, frequency) -> None:
+    def __init__(self, volume, terminal_time, start_time, time_delta) -> None:
         super().__init__(volume, 'rl_agent')
         self.orders_within_range = set()
         self.start_time = start_time
         self.terminal_time = terminal_time
-        self.frequency = frequency
-        
-    
+        self.time_delta = time_delta
+            
     def generate_order(self, time, lob, action):
         """
         - generate list of orders from an action
@@ -616,7 +646,6 @@ class RLAgent(ExecutionAgent):
             return order_list
         else:
             return None 
-
     
     def get_observation(self, time, lob):        
         best_bid = lob.get_best_price(side='bid')
@@ -681,6 +710,30 @@ class RLAgent(ExecutionAgent):
 
         # 
         return out 
+    
+    def new_event(self, time, event):
+        assert time >= self.start_time
+        assert time <= self.terminal_time
+        assert time % self.time_delta == 0
+        if time < self.terminal_time-self.time_delta:
+            if event == 'rl_agent_observation':
+                return (time, 0, 'rl_agent_action')
+            elif event == 'rl_agent_action':
+                return (time+self.time_delta, 0, 'rl_agent_observation')            
+            else:
+                raise ValueError(f'Unknown event {event}')
+        elif time == self.terminal_time-self.time_delta:
+            if event == 'rl_agent_observation':
+                return (time, 0, 'rl_agent_action')
+            elif event == 'rl_agent_action':
+                assert time + self.time_delta == self.terminal_time
+                return (time+self.time_delta, 0, 'rl_agent_action')
+            else:
+                raise ValueError(f'Unknown event {event}')
+
+    def initial_event(self):
+        return (self.start_time, 0, 'rl_agent_observation')
+
             
 class StrategicAgent():
     """

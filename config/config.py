@@ -33,11 +33,11 @@ noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
 # volume related things 
 noise_agent_config['volume_distribution'] = 'half_normal'
 noise_agent_config['market_mean'] = 0
-noise_agent_config['market_std'] = 2
+noise_agent_config['market_std'] = 1
 noise_agent_config['limit_mean'] = 0
-noise_agent_config['limit_std'] = 2
+noise_agent_config['limit_std'] = 1
 noise_agent_config['cancel_mean'] = 0
-noise_agent_config['cancel_std'] = 2
+noise_agent_config['cancel_std'] = 1
 noise_agent_config['volume_min'] = 1
 noise_agent_config['volume_max'] = 20
 noise_agent_config['unit_volume'] = True
