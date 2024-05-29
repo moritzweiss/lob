@@ -168,6 +168,7 @@ def rollout(seed, num_episodes, execution_agent, market_type, volume):
         drifts.append(drift)
     return total_rewards, n_events, n_cancellations, n_limits, n_markets, drifts
 
+# note: can also use ray for multiprocessing rollouts 
 def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
     samples_per_env = int(n_samples/n_cpus) 
     with Pool(n_cpus) as p:
