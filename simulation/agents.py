@@ -56,7 +56,7 @@ class NoiseAgent():
         assert self.level >= 10, 'level must be at least 10'
         self.limit_intensities = np.pad(limit_intensities, (0,self.level-len(limit_intensities)), 'constant', constant_values=(0))
         self.cancel_intensities = np.pad(cancel_intensities, (0,self.level-len(cancel_intensities)), 'constant', constant_values=(0))
-        self.market_intesity = market_intensity
+        self.market_intensity = market_intensity
 
         # volume distribution. could seperate this out into another class 
         self.unit_volume = unit_volume
@@ -148,13 +148,16 @@ class NoiseAgent():
             if np.isnan(best_ask_price):
                 # bid and ask are nan 
                 order = LimitOrder(agent_id=self.agent_id, side='bid', price=self.initial_bid, volume=self.initial_shape[0], time=time)
+                print('both bid and ask are nan')
             else:
                 # bid is nan, ask is not nan
                 order = LimitOrder(agent_id=self.agent_id, side='bid', price=best_ask_price-1, volume=self.initial_shape[0], time=time)
+                print('bid is nan')
             return [order]
         if np.isnan(best_ask_price):
             # ask is nan, bid is not nan 
             order = LimitOrder(agent_id=self.agent_id, side='ask', price=best_bid_price+1, volume=self.initial_shape[0], time=time)
+            print('ask is nan')
             return [order]
 
         assert len(bid_volumes) == len(ask_volumes), 'bid and ask volumes must have the same length'
@@ -168,13 +171,15 @@ class NoiseAgent():
             if np.sum(bid_volumes) == 0:
                 weighted_bid_volumes = 0
             else:
-                idx = np.nonzero(bid_volumes)[0][0]
-                weighted_bid_volumes = np.sum(self.damping_weights[:L-idx]*bid_volumes[idx:])
+                # idx = np.nonzero(bid_volumes)[0][0]
+                # weighted_bid_volumes = np.sum(self.damping_weights[:L-idx]*bid_volumes[idx:])
+                weighted_bid_volumes = np.sum(self.damping_weights*bid_volumes)
             if np.sum(ask_volumes) == 0:
                 weighted_ask_volumes = 0
             else:
-                idx = np.nonzero(ask_volumes)[0][0]
-                weighted_ask_volumes = np.sum(self.damping_weights[:L-idx]*ask_volumes[idx:])
+                # idx = np.nonzero(ask_volumes)[0][0]
+                # weighted_ask_volumes = np.sum(self.damping_weights[:L-idx]*ask_volumes[idx:])
+                weighted_ask_volumes = np.sum(self.damping_weights*ask_volumes)
             if (weighted_bid_volumes + weighted_ask_volumes) == 0:
                 imbalance = 0
             else:
@@ -195,8 +200,8 @@ class NoiseAgent():
             # if I = 1, price goes up --> more market buys
             # market_buy_intensity = self.market_intesity*(1+imbalance)
             # market_sell_intensity = self.market_intesity*(1-imbalance)
-            market_buy_intensity = self.market_intesity*(1+pos)
-            market_sell_intensity = self.market_intesity*(1+neg)
+            market_buy_intensity = self.market_intensity*(1+pos)
+            market_sell_intensity = self.market_intensity*(1+neg)
             # adjust cancellation intensities
             # if imbalance = 1, price goes up --> cancel limit sell orders (ask)
             # adjust cancellation intensities
@@ -229,7 +234,7 @@ class NoiseAgent():
             # imbalance*bid_limit_intensities[:n]*self.damping_weights[:n]
             # bid_limit_intensities[:n] = bid_limit_intensities[:n]*(1+0.001*pos)        
         else:
-            market_buy_intensity = market_sell_intensity = self.market_intesity
+            market_buy_intensity = market_sell_intensity = self.market_intensity
             bid_limit_intensities = ask_limit_intensities = self.limit_intensities
 
         probability = np.array([market_sell_intensity, market_buy_intensity, np.sum(bid_limit_intensities), np.sum(ask_limit_intensities), np.sum(bid_cancel_intensity), np.sum(ask_cancel_intensity)])        
@@ -307,7 +312,7 @@ class NoiseAgent():
             raise
     
     def initial_event(self, LOB):
-        assert self.waiting_time is None 
+        # assert self.waiting_time is None 
         # this sets self.waiting_time 
         self.generate_order(LOB, self.start_time)
         return (self.start_time+self.waiting_time, 1, 'noise_agent_action')
