@@ -25,7 +25,8 @@ def average_shape(n_steps=1, rng=default_rng(0), initial_shape=50, damping_facto
     noise_agent_config['imbalance_reaction'] = imbalance
     noise_agent_config['imbalance_factor'] = imbalance_factor
     noise_agent_config['rng'] = rng    
-    noise_agent_config['unit_volume'] = True
+    noise_agent_config['unit_volume'] = False
+    # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
     NA = NoiseAgent(**noise_agent_config)
     LOB = LimitOrderBook(list_of_agents=[NA.agent_id], level=30, only_volumes=True)
     orders = NA.initialize(time=0)
@@ -73,22 +74,23 @@ if __name__ == '__main__':
     average_shape(n_steps=int(2e3), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
     # bidv0, askv0, midp0, mp = mp_rollout(N, 50, 1, 0, True)
     # bidv5, askv5, midp5 = mp_rollout(N, 50, 1, 0.5, True)
-    if True: 
-        N = int(1e4)
-        bidv, askv, midp_diff, midp, _, _  = average_shape(n_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=False)
-        bidv_imb, askv_imb, midp_diff_imb, midp_imb, _, _ = average_shape(n_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=2.0, imbalance=True, imbalance_factor=3)
+    if False: 
+        N = int(1e5)
+        bidv, askv, midp_diff, midp, _, _  = average_shape(n_steps=int(N), rng=default_rng(0), initial_shape=10, damping_factor=0.5, imbalance=False)
+        damping_factor = 0.7
+        bidv_imb, askv_imb, midp_diff_imb, midp_imb, _, _ = average_shape(n_steps=int(N), rng=default_rng(0), initial_shape=10, damping_factor=damping_factor, imbalance=True, imbalance_factor=3)
         # bidv_imb_5, askv_imb_5, midp_diff_imb_5, midp_imb_5, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True)
         # bidv_imb_7, askv_imb_7, midp_diff_imb_7, midp_imb_7, _ = average_shape(n_time_steps=int(N), rng=default_rng(0), initial_shape=1, damping_factor=0.75, imbalance=True)
         plt.figure(figsize=(10, 6))
         plt.xlim(0, len(midp))
         plt.grid(True)
         plt.plot(midp, label='Noise')
-        plt.plot(midp_imb, label='Noise+Flow')
+        plt.plot(midp_imb, label=f'Noise+Flow, c={damping_factor}')
         # plt.plot(midp_imb_5, label='Noise+Flow, c=0.5')
         # plt.plot(midp_imb_7, label='Noise+Flow, c=0.75')
         plt.legend()
         plt.savefig('midp.pdf', dpi=350)
-        print('DONE')
+        print('DONE')                
     if True:
         N = int(1e6)
         # damping_factor = 0.5 
@@ -96,7 +98,7 @@ if __name__ == '__main__':
         bidv, askv, midp_diff, trades, average_time_step = mp_rollout(N, 60, 1, 0, False)
         # print(np.nanmean(bidv, axis=0))
         np.savez('initial_shape/noise_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-        bidv_imb, akv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(N, 60, 1, damping_factor=0.75, imbalance=True)
+        bidv_imb, akv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(N, 60, 1, damping_factor=0.7, imbalance=True)
         # bidv_imb_5, askv_imb_5, midp_diff_imb_5, trades_imb_5 = mp_rollout(N, 50, 10, damping_factor=0.5, imbalance=True)
         # bidv_imb_7, askv_imb_7, midp_diff_imb_7, trades_imb_7 = mp_rollout(N, 50, 10, damping_factor=0.75, imbalance=True)
         np.savez('initial_shape/noise_flow_75_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
@@ -124,10 +126,10 @@ if __name__ == '__main__':
         fig.savefig('average_shape.pdf', dpi=350)
         # 
         fig, axs = plt.subplots(figsize=(10, 6))
-        plot_average_book_shape(bidv_imb, akv_imb, level=10, file_name=f'noise_flow', title=f'noise+flow,c={1}', ax=axs)        
+        plot_average_book_shape(bidv_imb, akv_imb, level=10, file_name=f'noise_flow', title=f'noise+flow', ax=axs)        
         fig.tight_layout()
         fig.savefig('average_shape_imbalance.pdf', dpi=350)
-    if True:
+    if False:
         N = int(2e3)        
         plt.figure(figsize=(10, 6))
         # print(midp_diff_imb)
