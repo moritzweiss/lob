@@ -138,6 +138,8 @@ class NoiseAgent():
             - time: float item time 
 
         """
+        assert time >= order.time 
+        
         best_bid_price = lob.data.best_bid_prices[-1]
         best_ask_price = lob.data.best_ask_prices[-1]
         bid_volumes = lob.data.bid_volumes[-1]
@@ -499,7 +501,7 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         assert start_time < terminal_time
         assert time_delta < terminal_time, 'time delta must be less than terminal time'
         assert terminal_time % time_delta == 0, 'terminal time must be divisible by time delta'
-        time_steps = terminal_time/time_delta
+        time_steps = (terminal_time-start_time)/time_delta
         assert 0 < volume < time_steps or volume % time_steps == 0, 'volume must be divisible by time delta or volume < time delta'
         self.terminal_time = terminal_time
         self.start_time = start_time

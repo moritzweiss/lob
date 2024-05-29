@@ -163,35 +163,36 @@ def test_dynamic():
     return None 
     
 def test_linear_sl_agent():
-    # pass
+    # volume = 20, time steps: 0,1,2,...,10
+    # orders of size 2 at times 0,1,2,...,9
+    # sell remaining position at terminal time = 10
     volume = 20
-    LSL = LinearSubmitLeaveAgent(volume=volume, start_time=0, terminal_time=10, frequency=1)
+    LSL = LinearSubmitLeaveAgent(volume=volume, start_time=0, terminal_time=10, time_delta=1)
     LOB = LimitOrderBook(list_of_agents=['noise_agent', LSL.agent_id], level=5, only_volumes=False)
-    # initialize the bid 
+    # one order on the bid side 
     order_list = []
     order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100, volume=volume, time=0))
     LOB.process_order_list(order_list)
-    # agent 
+    # agent sends order to bid+1
     order = LSL.generate_order(LOB.time, LOB)
     msg = LOB.process_order_list(order)
     LSL.update_position_from_message_list(msg)
-    # market order 
+    # market order depletes agent offer 
     order_list = []
     order_list.append(MarketOrder(side='ask', agent_id='noise_agent', volume=2, time=0))
     msg = LOB.process_order_list(order_list)
     LSL.update_position_from_message_list(msg)
     for time in range(1,11,1):
         # time runs through 1,2, ..., 10
-        # establish new bid price cancel and cancel old bid 
+        # set new bids at 100+1, 100+2, ..., 100+10 and cancel old bids 
         order_list = []
         order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100+time, volume=volume, time=time))
         order_list.append(CancellationByPriceVolume(side='bid', agent_id='noise_agent', price=100+time-1, volume=volume, time=time))
         msg = LOB.process_order_list(order_list)
         # l_sl agent sends order 
         order = LSL.generate_order(LOB.time, LOB)
-        if order is not None:
-            msg = LOB.process_order_list(order)
-            LSL.update_position_from_message_list(msg)
+        msg = LOB.process_order_list(order)
+        LSL.update_position_from_message_list(msg)
         # market order which fills l_sl 
         order_list = []
         order_list.append(MarketOrder(side='ask', agent_id='noise_agent', volume=2, time=time))
@@ -200,8 +201,29 @@ def test_linear_sl_agent():
         if terminated:
             break
     assert LSL.cummulative_reward == sum([((100+1+time)*2 - 2*100)/20 for time in range(10)])
-    pass
+    return None
 
+def test_linear_sl_agent_no_fills():
+    # Note the order book time can only change through an actual order. 
+    # otherwise it just stays the same
+    # could update this going forward 
+    Agent = LinearSubmitLeaveAgent(volume=5, start_time=0, terminal_time=5, time_delta=1)
+    LOB = LimitOrderBook(list_of_agents=['noise_agent', Agent.agent_id], level=5, only_volumes=False)
+    order_list = []
+    order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100, volume=1, time=0)) 
+    order_list.append(LimitOrder(side='ask', agent_id='noise_agent', price=101, volume=1, time=0))
+    LOB.process_order_list(order_list)
+    for time in range(0,6,1):
+        # 
+        order = LimitOrder(side='bid', agent_id='noise_agent', price=100-time-1, volume=1, time=time)
+        LOB.process_order(order)
+        # 
+        order = Agent.generate_order(time, LOB)
+        msg = LOB.process_order_list(order)
+        Agent.update_position_from_message_list(msg)
+    assert Agent.cummulative_reward == (100+99+98+97+96 - 5*100)/5
+    # bids at 100, 100-1, ..., 100-5
+    return None 
 
 
 test_market_order()
@@ -211,4 +233,5 @@ sell_remaining()
 test_cancellation()
 test_dynamic()
 test_linear_sl_agent()
+test_linear_sl_agent_no_fills()
 
