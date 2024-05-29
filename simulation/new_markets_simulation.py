@@ -2,10 +2,14 @@ from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAnd
 from limit_order_book.limit_order_book import LimitOrderBook
 from config.config import noise_agent_config, strategic_agent_config, sl_agent_config, linear_sl_agent_config, market_agent_config
 import numpy as np
+import pandas as pd 
 from config.config import noise_agent_config
 from queue import PriorityQueue
 from dataclasses import dataclass, field
 from typing import Any
+from multiprocessing import Pool
+import itertools
+import time
 
 
 class Market():
@@ -13,6 +17,7 @@ class Market():
 
         # noise agent setting
         noise_agent_config['rng'] = np.random.default_rng(seed)
+        noise_agent_config['unit_volume'] = True
         if market_env == 'noise':
             noise_agent_config['imbalance_reaction'] = False
             noise_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
@@ -20,10 +25,13 @@ class Market():
         else: 
             noise_agent_config['imbalance_reaction'] = True
             noise_agent_config['imbalance_factor'] = 2.0
-            noise_agent_config['unit_volume'] = True
             # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
             noise_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
             self.noise_agent = NoiseAgent(**noise_agent_config)            
+            self.noise_agent.limit_intensities = self.noise_agent.limit_intensities * 0.7
+            self.noise_agent.market_intensity = self.noise_agent.market_intensity * 0.7
+            self.noise_agent.cancel_intensities = self.noise_agent.cancel_intensities * 0.7
+
 
         # strategic agent settings 
         strategic_agent_config['time_delta'] = 7.5
@@ -81,13 +89,17 @@ class Market():
         return None 
     
     def run(self):
-        n = 0 
+        n_events = 0 
+        n_cancellations = 0 
+        n_limits = 0 
+        n_markets = 0 
+        initial_bid = self.lob.get_best_price('bid')
         terminated = False
         observation = False
         while not terminated and not observation: 
-            n += 1
+            n_events += 1
             time, _, event = self.pq.get()
-            print(f'{event}, time={time}')
+            # print(f'{event}, time={time}')
             if event == 'execution_agent_action':
                 orders = self.execution_agent.generate_order(time, self.lob)
                 msgs = self.lob.process_order_list(orders)
@@ -104,6 +116,14 @@ class Market():
                 break 
             elif event == 'noise_agent_action':
                 orders = self.noise_agent.generate_order(self.lob, time=time)
+                if orders[0].type == 'cancellation_by_price_volume':
+                    n_cancellations += 1
+                elif orders[0].type == 'limit':
+                    n_limits += 1
+                elif orders[0].type == 'market':
+                    n_markets += 1
+                else:
+                    raise ValueError(f'type={orders[0].type} not recognized')
                 msgs = self.lob.process_order_list(orders)
                 rewards, terminated = self.execution_agent.update_position_from_message_list(msgs)
                 if terminated:
@@ -124,18 +144,80 @@ class Market():
             else:
                 raise ValueError(f'event={event} not recognized')
         
-        print(f'total reward: {self.execution_agent.cummulative_reward}')
-        print(f"bid price: {self.lob.get_best_price('bid')}")
-        print(f'number of events: {n}')
+        drift = self.lob.get_best_price('bid') - initial_bid
+
+        return self.execution_agent.cummulative_reward, n_events, n_cancellations, n_limits, n_markets, drift  
+
+
+def rollout(seed, num_episodes, execution_agent, market_type, volume):
+    M = Market(volume=volume, execution_agent=execution_agent, market_env=market_type, seed=seed)
+    total_rewards = []
+    n_events = []
+    n_limits = []
+    n_markets = []
+    n_cancellations = []
+    drifts = []
+    for _ in range(num_episodes):
+        M.reset()
+        total_reward, n_event, n_cancel, n_limit, n_market, drift = M.run()
+        total_rewards.append(total_reward)
+        n_events.append(n_event)
+        n_limits.append(n_limit)
+        n_markets.append(n_market)
+        n_cancellations.append(n_cancel)
+        drifts.append(drift)
+    return total_rewards, n_events, n_cancellations, n_limits, n_markets, drifts
+
+def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
+    samples_per_env = int(n_samples/n_cpus) 
+    with Pool(n_cpus) as p:
+        out = p.starmap(rollout, [(seed, samples_per_env, execution_agent, market_type, volume) for seed in range(n_cpus)])    
+    all_rewards, n_events, n_cancel, n_limit, n_market, drift  = zip(*out)
+    all_rewards = list(itertools.chain.from_iterable(all_rewards))
+    n_events = list(itertools.chain.from_iterable(n_events))
+    n_cancel = list(itertools.chain.from_iterable(n_cancel))
+    n_limit = list(itertools.chain.from_iterable(n_limit))
+    n_market = list(itertools.chain.from_iterable(n_market))
+    drift = list(itertools.chain.from_iterable(drift))
+    return all_rewards, n_events, n_cancel, n_limit, n_market, drift 
 
 
 M = Market(volume=10, execution_agent='linear_sl_agent', market_env='flow', seed=1)
 M.reset()
-M.run()
+out = M.run()
+
+# out = rollout(0, 10, 'linear_sl_agent', 'flow', 10)
+# print(out)
+
+if __name__ == '__main__':
+    n_samples = 1000
+    n_cpus = 50
+    for lots in [10, 40]:
+        results = {}
+        for agent in ['sl_agent', 'linear_sl_agent']:
+            results[f'{agent}_reward_mean'] = []
+            results[f'{agent}_reward_std'] = []
+            results[f'{agent}_n_events'] = []
+            results[f'{agent}_n_cancellations'] = []
+            results[f'{agent}_n_limits'] = []
+            results[f'{agent}_n_markets'] = []
+            results[f'{agent}_drift'] = []
+            for env in ['noise', 'flow']:
+                rewards, n_events, n_cancel, n_limit, n_market, drift = mp_rollout(n_samples, n_cpus, agent, env, lots)
+                results[f'{agent}_reward_mean'].append(np.mean(rewards))
+                results[f'{agent}_reward_std'].append(np.std(rewards))
+                results[f'{agent}_n_events'].append(np.mean(n_events))
+                results[f'{agent}_n_cancellations'].append(np.mean(n_cancel))
+                results[f'{agent}_n_limits'].append(np.mean(n_limit))
+                results[f'{agent}_n_markets'].append(np.mean(n_market))
+                results[f'{agent}_drift'].append(np.mean(drift))
+        results = pd.DataFrame.from_dict(results).round(2)
+        results.index = ['noise', 'flow']
+        print(results)
+        results.to_csv(f'results/benchmarks_{lots}.csv')
 
 
-# @dataclass(order=True)
-# class PrioritizedItem:
+
 #     priority: int
 #     item: Any = field(compare=False)
 
