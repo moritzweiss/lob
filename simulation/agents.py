@@ -138,7 +138,7 @@ class NoiseAgent():
             - time: float item time 
 
         """
-        assert time >= order.time 
+        assert time >= lob.time 
         
         best_bid_price = lob.data.best_bid_prices[-1]
         best_ask_price = lob.data.best_ask_prices[-1]
