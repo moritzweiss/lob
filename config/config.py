@@ -1,4 +1,7 @@
 import numpy as np
+
+# TODO: add priority to config dicts 
+
 ## 
 # parameters from the paper 
 limit_intensities = np.array([0.2842, 0.5255, 0.2971, 0.2307, 0.0826, 0.0682, 0.0631, 0.0481, 0.0462, 0.0321, 0.0178, 0.0015, 0.0001])
@@ -58,12 +61,15 @@ noise_agent_config['initial_ask'] = 1001
 
 # 
 noise_agent_config['start_time'] = 0 
+noise_agent_config['terminal_time'] = None
+noise_agent_config['priority'] = 1
 
 # sl 
 sl_agent_config = {}
 sl_agent_config['volume'] = None
 sl_agent_config['terminal_time'] = None
 sl_agent_config['start_time'] = 0 
+sl_agent_config['priority'] = 0
 
 # linear sl 
 linear_sl_agent_config = {}
@@ -71,11 +77,13 @@ linear_sl_agent_config['volume'] = None
 linear_sl_agent_config['terminal_time'] = None
 linear_sl_agent_config['start_time'] = 0
 linear_sl_agent_config['time_delta'] = 500
+linear_sl_agent_config['priority'] = 0
 
 # market 
 market_agent_config = {}
 market_agent_config['volume'] = None
 market_agent_config['start_time'] = 0
+market_agent_config['priority'] = 0
 
 # rl
 rl_agent_config = {}
@@ -83,6 +91,7 @@ rl_agent_config['volume'] = None
 rl_agent_config['terminal_time'] = None
 rl_agent_config['start_time'] = 0
 rl_agent_config['time_delta'] = 500
+rl_agent_config['priority'] = 0
 
 # strategic
 strategic_agent_config = {}
@@ -91,3 +100,14 @@ strategic_agent_config['time_delta'] = 50
 strategic_agent_config['market_volume'] = 1
 strategic_agent_config['limit_volume'] = 3
 strategic_agent_config['rng'] = None 
+strategic_agent_config['priority'] = 2
+
+# initial 
+initial_agent_config = {}   
+initial_agent_config['start_time'] = 0
+initial_agent_config['initial_bid'] = 1000
+initial_agent_config['initial_ask'] = 1001
+initial_agent_config['n_initial_levels'] = 30
+initial_agent_config['initial_shape'] = None 
+initial_agent_config['initial_shape_file'] = None
+initial_agent_config['priority'] = -1
