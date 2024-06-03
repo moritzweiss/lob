@@ -22,7 +22,9 @@ class NoiseAgent():
                  damping_factor, imbalance_reaction, imbalance_factor,                 
                  initial_bid, 
                  initial_ask, 
-                 start_time
+                 start_time,
+                 terminal_time,
+                 priority 
                  ):
         """"    
         Parameters:
@@ -78,10 +80,12 @@ class NoiseAgent():
 
         self.agent_id = 'noise_agent'
 
-        # 
         self.current_order = None 
         self.waiting_time = None 
         self.start_time = start_time
+        self.terminal_time = terminal_time
+
+        self.priority = priority
 
         return None  
     
@@ -89,16 +93,16 @@ class NoiseAgent():
         self.np_random = rng
         return None
     
-    def initialize(self, time): 
+    # def initialize(self, time): 
         # ToDo: initial bid and ask as variable 
-        orders = [] 
-        for idx, price in enumerate(np.arange(self.initial_ask-1, self.initial_ask-1-self.initial_level, -1)):
-            order = LimitOrder(agent_id=self.agent_id, side='bid', price=price, volume=self.initial_shape[idx], time=time)
-            orders.append(order)
-        for idx, price in enumerate(np.arange(self.initial_bid+1, self.initial_bid+self.initial_level+1, 1)): 
-            order = LimitOrder(agent_id=self.agent_id, side='ask', price=price, volume=self.initial_shape[idx], time=time)
-            orders.append(order)
-        return orders
+        # orders = [] 
+        # for idx, price in enumerate(np.arange(self.initial_ask-1, self.initial_ask-1-self.initial_level, -1)):
+        #     order = LimitOrder(agent_id=self.agent_id, side='bid', price=price, volume=self.initial_shape[idx], time=time)
+        #     orders.append(order)
+        # for idx, price in enumerate(np.arange(self.initial_bid+1, self.initial_bid+self.initial_level+1, 1)): 
+        #     order = LimitOrder(agent_id=self.agent_id, side='ask', price=price, volume=self.initial_shape[idx], time=time)
+        #     orders.append(order)
+        # return orders
 
     def volume(self, action):
         if self.unit_volume:
@@ -139,6 +143,11 @@ class NoiseAgent():
 
         """
         assert time >= lob.time 
+        assert time >= self.start_time
+
+        # if time == self.start_time:
+        #     self.waiting_time = 0 
+        #     return self.initialize(time)
         
         best_bid_price = lob.data.best_bid_prices[-1]
         best_ask_price = lob.data.best_ask_prices[-1]
@@ -239,9 +248,11 @@ class NoiseAgent():
             market_buy_intensity = market_sell_intensity = self.market_intensity
             bid_limit_intensities = ask_limit_intensities = self.limit_intensities
 
+        # TODO: write all of this into a seperate function which outputs the updated intensities 
         probability = np.array([market_sell_intensity, market_buy_intensity, np.sum(bid_limit_intensities), np.sum(ask_limit_intensities), np.sum(bid_cancel_intensity), np.sum(ask_cancel_intensity)])        
         assert np.all(probability >= 0), 'all probabilities must be > 0'
         waiting_time = self.np_random.exponential(1/np.sum(probability))
+        # Note: we save this into an attribute such that it doesnt need to be recomputet later 
         self.waiting_time = waiting_time
         # waiting_time = 1 
 
@@ -306,18 +317,29 @@ class NoiseAgent():
 
     def new_event(self, time, event):
         assert self.waiting_time is not None 
+        assert event == self.agent_id
+        assert time >= self.start_time
+        if time >= self.terminal_time:
+            return None 
         waiting_time = self.waiting_time
+        # just for safety reasons. to ensure that waiting time is set again
         self.waiting_time = None
-        if event == 'noise_agent_action':
-            return (time+waiting_time, 1, 'noise_agent_action')
-        else:
-            raise
+        return (time+waiting_time, self.priority, self.agent_id)
     
-    def initial_event(self, LOB):
+    def initial_event(self):
+        # TODO: add priority for agents 
         # assert self.waiting_time is None 
         # this sets self.waiting_time 
-        self.generate_order(LOB, self.start_time)
-        return (self.start_time+self.waiting_time, 1, 'noise_agent_action')
+        # self.generate_order(LOB, self.start_time)
+        # t = self.waiting_time
+        # self.waiting_time = None
+        # strictly speaking the start time should be self.start_time+exponential waiting time
+        # but this is a bit annoying to implement 
+        # the below should not make much of a difference 
+        return (self.start_time, self.priority, self.agent_id)
+
+    def reset(self):
+        pass 
 
 class ExecutionAgent():
     """
@@ -327,9 +349,10 @@ class ExecutionAgent():
         - update positin takes a message and updates volumes, passive fille, market fills, and rewards  
         - reset function 
     """
-    def __init__(self, volume, agent_id) -> None:
+    def __init__(self, volume, agent_id, priority=0) -> None:
         self.initial_volume = volume
         self.agent_id = agent_id
+        self.priority = priority
         self.reset()
     
     def reset(self):
@@ -435,11 +458,11 @@ class ExecutionAgent():
 
 class MarketAgent(ExecutionAgent):
 
-    def __init__(self, volume, start_time) -> None:
-        super().__init__(volume, 'market_agent')
+    def __init__(self, volume, start_time, priority) -> None:
+        super().__init__(volume, 'market_agent', priority)
         self.start_time = start_time
                     
-    def generate_order(self, time, lob):
+    def generate_order(self, lob, time):
         assert self.active_volume >= 0 
         assert self.volume >= 0
         if time == self.start_time:
@@ -453,19 +476,20 @@ class MarketAgent(ExecutionAgent):
     
     def new_event(self, time, event):
         # should never happen, raise error if it does 
+        # TODO: improve logic here !! 
         raise ValueError('market agent only acts once')
 
     def initial_event(self):
-        return (self.start_time, 0, 'execution_agent_action')
+        return (self.start_time, 0, self.agent_id)
 
 class SubmitAndLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, start_time, terminal_time) -> None:
-        super().__init__(volume, 'sl_agent')
+    def __init__(self, volume, start_time, terminal_time, priority) -> None:
+        super().__init__(volume, 'sl_agent', priority)
         self.terminal_time = terminal_time
         self.start_time = start_time
                         
-    def generate_order(self, time, lob):
+    def generate_order(self, lob, time):
         assert self.volume >= 0
         assert self.active_volume >= 0 
         assert 0 <= time <= self.terminal_time        
@@ -484,20 +508,19 @@ class SubmitAndLeaveAgent(ExecutionAgent):
         return None 
     
     def new_event(self, time, event):
+        assert event == self.agent_id
         assert time == self.start_time
         assert self.volume > 0 
-        if event == 'execution_agent_action':
-            return (self.terminal_time, 0, 'execution_agent_action')
-        else:
-            raise ValueError(f'Unknown event {event}')
+        # TODO: add logic for the terminal time step !! 
+        return (self.terminal_time, self.priority, self.agent_id)
     
     def initial_event(self):
-        return (self.start_time, 0, 'execution_agent_action')
-
+        return (self.start_time, self.priority, self.agent_id)
+    
 class LinearSubmitLeaveAgent(ExecutionAgent):
 
-    def __init__(self, volume, start_time, time_delta, terminal_time) -> None:
-        super().__init__(volume=volume, agent_id='linear_sl_agent')
+    def __init__(self, volume, start_time, time_delta, terminal_time, priority) -> None:
+        super().__init__(volume=volume, agent_id='linear_sl_agent', priority=priority)
         assert start_time < terminal_time
         assert time_delta < terminal_time, 'time delta must be less than terminal time'
         assert terminal_time % time_delta == 0, 'terminal time must be divisible by time delta'
@@ -516,7 +539,7 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
             self.submit_and_leave = True
         return None 
                         
-    def generate_order(self, time, lob):
+    def generate_order(self, lob, time):
         assert self.volume > 0 
         assert time >= self.start_time
         # (205-5)%100 == 0 
@@ -547,35 +570,34 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         return None 
     
     def new_event(self, time, event):
+        assert event == self.agent_id
+        assert event == self.agent_id
         assert time <= self.terminal_time
         assert time >= self.start_time
         assert (time - self.start_time) % self.time_delta == 0, 'time-start_time must be divisible by time delta'
         assert self.volume > 0 
-        if event == 'execution_agent_action':
-            # we just took an action, what is the next event ? 
-            # (time, priority, task)
-            if self.submit_and_leave:
-                return (self.terminal_time, 0, 'execution_agent_action')
-            else:
-                return (time+self.time_delta, 0, 'execution_agent_action')
+        # we just took an action, what is the next event ? 
+        # (time, priority, task)
+        if self.submit_and_leave:
+            return (self.terminal_time, self.priority, self.agent_id)
         else:
-            raise ValueError(f'Unknown event {event}')
-    
+            return (time+self.time_delta, self.priority, self.agent_id)
+            
     def initial_event(self):
-        return (self.start_time, 0, 'execution_agent_action')
+        return (self.start_time, self.priority, self.agent_id)
 
 class RLAgent(ExecutionAgent):
     """
         - this agent takes in an action and then generates an order
     """
-    def __init__(self, volume, terminal_time, start_time, time_delta) -> None:
-        super().__init__(volume, 'rl_agent')
+    def __init__(self, volume, terminal_time, start_time, time_delta, priority) -> None:
+        super().__init__(volume, 'rl_agent', priority)
         self.orders_within_range = set()
         self.start_time = start_time
         self.terminal_time = terminal_time
         self.time_delta = time_delta
             
-    def generate_order(self, time, lob, action):
+    def generate_order(self, lob, time, action):
         """
         - generate list of orders from an action
         - return the list of orders
@@ -740,14 +762,13 @@ class RLAgent(ExecutionAgent):
 
     def initial_event(self):
         return (self.start_time, 0, 'rl_agent_observation')
-
-            
+                
 class StrategicAgent():
     """
     - just sends limit and market orders at some frequency
     - we do not keep track of the agents position 
     """
-    def __init__(self, start_time, time_delta, market_volume, limit_volume, rng) -> None:
+    def __init__(self, start_time, time_delta, market_volume, limit_volume, rng, priority=-1) -> None:
         # assert 0 <= offset < frequency, 'offset must be in {0,1, ..., frequency-1}'        
         self.start_time = start_time
         self.time_delta = time_delta
@@ -756,6 +777,7 @@ class StrategicAgent():
         self.agent_id = 'strategic_agent'
         self.rng = rng
         self.direction = None 
+        self.priority = priority   
         return None 
     
     def generate_order(self, lob, time):        
@@ -778,15 +800,57 @@ class StrategicAgent():
             # in the current set up this should never happen ! 
             return None 
         
-    def reset_direction(self):
+    def reset(self):
         self.direction = self.rng.choice(['buy', 'sell'])
         return None
     
     def new_event(self, time, event):
-        if event == 'strategic_agent_action':
-            return (time+self.time_delta, 2, 'strategic_agent_action')
-        else:
-            raise ValueError(f'Unknown event {event}')
+        assert event == self.agent_id
+        return (time+self.time_delta, self.priority, self.agent_id)
     
     def initial_event(self):
-        return (self.start_time, 2, 'strategic_agent_action')
+        return (self.start_time, self.priority, self.agent_id)
+
+class InitalAgent():
+    def __init__(self, start_time, initial_bid, initial_ask, initial_shape, n_initial_levels, initial_shape_file=None, priority=-1):
+        self.priority = priority
+        self.start_time = start_time
+        self.initial_bid = initial_bid
+        self.initial_ask = initial_ask
+        self.agent_id = 'initial_agent'
+        self.n_inital_levels = n_initial_levels
+        if initial_shape_file is None:
+            self.initial_shape = np.array([initial_shape]*self.n_initial_levels) 
+        else:
+            shape = np.load(initial_shape_file)
+            self.initial_shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf)      
+            assert len(self.initial_shape) == self.n_inital_levels
+        return None 
+    
+    def generate_order(self, lob, time):
+        # lob is part of the argumenets because all the other generate_order methods have lob as an argument 
+        # TODO: how to avoid this ? 
+        assert time == self.start_time
+        orders = []
+        for idx, price in enumerate(np.arange(self.initial_ask-1, self.initial_ask-1-self.n_inital_levels, -1)):
+            order = LimitOrder(agent_id=self.agent_id, side='bid', price=price, volume=self.initial_shape[idx], time=time)
+            orders.append(order)
+        for idx, price in enumerate(np.arange(self.initial_bid+1, self.initial_bid+1+self.n_inital_levels, 1)):
+            order = LimitOrder(agent_id=self.agent_id, side='ask', price=price, volume=self.initial_shape[idx], time=time)
+            orders.append(order)
+        return orders
+    
+    def new_event(self, time, event):
+        # time is passed here because all other methods have time 
+        assert time == self.start_time
+        assert event == self.agent_id
+        return None 
+    
+    def initial_event(self):
+        return (self.start_time, self.priority, self.agent_id)
+
+    def reset(self):
+        return None
+
+
+
