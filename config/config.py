@@ -1,8 +1,5 @@
 import numpy as np
 
-# TODO: add priority to config dicts 
-
-## 
 # parameters from the paper 
 limit_intensities = np.array([0.2842, 0.5255, 0.2971, 0.2307, 0.0826, 0.0682, 0.0631, 0.0481, 0.0462, 0.0321, 0.0178, 0.0015, 0.0001])
 market_intensity = 0.1237
@@ -101,6 +98,7 @@ strategic_agent_config['market_volume'] = 1
 strategic_agent_config['limit_volume'] = 3
 strategic_agent_config['rng'] = None 
 strategic_agent_config['priority'] = 2
+strategic_agent_config['terminal_time'] = 150
 
 # initial 
 initial_agent_config = {}   

@@ -768,7 +768,7 @@ class StrategicAgent():
     - just sends limit and market orders at some frequency
     - we do not keep track of the agents position 
     """
-    def __init__(self, start_time, time_delta, market_volume, limit_volume, rng, priority=-1) -> None:
+    def __init__(self, start_time, time_delta, market_volume, limit_volume, terminal_time, rng, priority=-1) -> None:
         # assert 0 <= offset < frequency, 'offset must be in {0,1, ..., frequency-1}'        
         self.start_time = start_time
         self.time_delta = time_delta
@@ -777,7 +777,8 @@ class StrategicAgent():
         self.agent_id = 'strategic_agent'
         self.rng = rng
         self.direction = None 
-        self.priority = priority   
+        self.priority = priority
+        self.terminal_time = terminal_time   
         return None 
     
     def generate_order(self, lob, time):        
@@ -805,13 +806,17 @@ class StrategicAgent():
         return None
     
     def new_event(self, time, event):
+        assert self.start_time <= time 
         assert event == self.agent_id
-        return (time+self.time_delta, self.priority, self.agent_id)
+        if time < self.terminal_time:
+            return (time+self.time_delta, self.priority, self.agent_id)
+        else:
+            return None
     
     def initial_event(self):
         return (self.start_time, self.priority, self.agent_id)
 
-class InitalAgent():
+class InitialAgent():
     def __init__(self, start_time, initial_bid, initial_ask, initial_shape, n_initial_levels, initial_shape_file=None, priority=-1):
         self.priority = priority
         self.start_time = start_time

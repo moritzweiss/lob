@@ -1,4 +1,4 @@
-from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, InitalAgent
+from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, InitialAgent
 from limit_order_book.limit_order_book import LimitOrderBook
 from config.config import noise_agent_config, strategic_agent_config, sl_agent_config, linear_sl_agent_config, market_agent_config, initial_agent_config
 import numpy as np
@@ -26,7 +26,7 @@ class Market():
         else:
             initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
             # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
-        agent = InitalAgent(**initial_agent_config)
+        agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
         # noise agent 
