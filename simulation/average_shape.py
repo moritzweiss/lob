@@ -6,7 +6,7 @@ sys.path.append(parent_dir)
 sys.path.append(current_dir)
 from config.config import noise_agent_config
 from limit_order_book.limit_order_book import LimitOrderBook
-from simulation.agents import NoiseAgent
+from simulation.agents import NoiseAgent, InitialAgent
 import numpy as np
 from numpy.random import default_rng
 import time 
@@ -16,27 +16,58 @@ import matplotlib.pyplot as plt
 from multiprocessing import Pool
 import itertools
 import seaborn as sns
-from config.config import noise_agent_config
+from config.config import noise_agent_config, initial_agent_config
+from queue import PriorityQueue
 
 
-def average_shape(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False, imbalance_factor=3):
-    noise_agent_config['initial_shape'] = initial_shape
+
+def average_shape(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False, imbalance_factor=3, shape_file=None):
+    agents = {}
+
+    # noise agent 
     noise_agent_config['damping_factor'] = damping_factor
     noise_agent_config['imbalance_reaction'] = imbalance
     noise_agent_config['imbalance_factor'] = imbalance_factor
     noise_agent_config['rng'] = rng    
     noise_agent_config['unit_volume'] = False
-    # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
-    NA = NoiseAgent(**noise_agent_config)
-    LOB = LimitOrderBook(list_of_agents=[NA.agent_id], level=30, only_volumes=True)
-    orders = NA.initialize(time=0)
-    LOB.process_order_list(orders)
-    t = 0
+    noise_agent_config['terminal_time'] = np.inf 
+    noise_agent_config['fall_back_volume'] = initial_shape
+    if shape_file is not None:
+        noise_agent_config['initial_shape_file'] = shape_file
+    agent = NoiseAgent(**noise_agent_config)
+    agents[agent.agent_id] = agent
+
+    # initial agent
+    initial_agent_config['initial_shape'] = initial_shape
+    agent = InitialAgent(**initial_agent_config)
+    agents[agent.agent_id] = agent
+
+    # LOB 
+    list_of_agents = [agent.agent_id for agent in agents.values()]
+    LOB = LimitOrderBook(list_of_agents=list_of_agents, level=30, only_volumes=True)
+
+    # reset agents 
+    for agent in agents.values():
+        agent.reset()
+
+    # pq 
+    pq = PriorityQueue()
+    for agent in agents.values():
+        out = agent.initial_event()
+        pq.put(out)
+
+    # simulation
     for _ in range(n_steps):
-        order = NA.generate_order(LOB, time=t)
-        t += NA.waiting_time
-        LOB.process_order_list(order)
-        LOB.clear_orders(30)
+        time, prio, agent_id = pq.get()
+        orders = agents[agent_id].generate_order(lob=LOB, time=time) 
+        order = orders[0]
+        if order.volume is None:
+            raise ValueError('Volume is None')        
+        LOB.process_order_list(orders)
+        out = agents[agent_id].new_event(time, agent_id)
+        if out is not None:
+            pq.put(out)
+    # 
     T = len(LOB.data.bid_volumes)
     bid_volumes = LOB.data.bid_volumes[-int(T/2):][::1000]
     ask_volumes = LOB.data.ask_volumes[-int(T/2):][::1000]
@@ -70,15 +101,17 @@ def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance, imba
     average_time_step = list(average_time_step)
     return bid_volumes, ask_volumes, midp_diff, trades, average_time_step
 
-def plot_prices(n_steps=int(1000), rng=default_rng(0), initial_shape=1, damping_factor=0.5, imbalance=True):
-    bidv, askv, midp_diff, midp, trades, average_time_step = average_shape(n_steps=int(n_steps), rng=default_rng(0), initial_shape=initial_shape, damping_factor=damping_factor, imbalance=imbalance)
+def plot_prices(n_steps=int(1000), rng=default_rng(0), initial_shape=1, damping_factor=0.5, shape_file=None):
+    bidv, askv, midp_diff, midp, trades, average_time_step = average_shape(n_steps=int(n_steps), rng=rng, initial_shape=initial_shape, damping_factor=damping_factor, imbalance=False, shape_file=shape_file)
+    bidv_imb, askv_imb, midp_diff_imb, midp_imb, trades_imb, average_time_step_imb = average_shape(n_steps=int(n_steps), rng=rng, initial_shape=initial_shape, damping_factor=damping_factor, imbalance=True, shape_file=shape_file)
     plt.figure(figsize=(10, 6))
     plt.xlim(0, len(midp))
     plt.grid(True)
     plt.plot(midp, label='Noise')
+    plt.plot(midp_imb, label='Flow')
     plt.legend()
     plt.savefig('plots/midp.pdf', dpi=350)
-    print('DONE')
+    print('price plot is done')
 
 def trades_hist(trades, trades_imb):
     plt.figure(figsize=(10, 6))
@@ -120,30 +153,20 @@ def plot_mid_price_changes(midp_diff, midp_diff_imb):
     
 
 if __name__ == '__main__':
-    # plot_prices()
+    # plot_prices(n_steps=int(1e5), rng=default_rng(4), initial_shape=5, damping_factor=0.2, shape_file='initial_shape/noise_unit.npz')
+    # average_shape(n_steps=4000, rng=default_rng(0), initial_shape=5, damping_factor=0.5, imbalance=False)
     ####
     N = int(1e6)
     start_time = timeit.default_timer()
     bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=N, n_cpus=60, initial_shape=1, damping_factor=0, imbalance=False)
-    np.savez('initial_shape/noise_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=N, n_cpus=60, initial_shape=1, damping_factor=0.7, imbalance=True)
-    np.savez('initial_shape/noise_flow_75_unit.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+    np.savez('initial_shape/noise.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=N, n_cpus=60, initial_shape=1, damping_factor=0.75, imbalance=True, imbalance_factor=2)
+    np.savez('initial_shape/noise_flow_75.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
     end_time = timeit.default_timer()
-    print(f"average time step noise = {np.mean(average_time_step)}")
-    print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
-    print(f"Execution time: {end_time - start_time} seconds")
-    #####    
+    # print(f"average time step noise = {np.mean(average_time_step)}")
+    # print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
+    # print(f"Execution time: {end_time - start_time} seconds")
+    # #####    
     plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=30)
     trades_hist(trades, trades_imb)
     plot_mid_price_changes(midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
-
-
-
-
-
-
-
-
-
-
-

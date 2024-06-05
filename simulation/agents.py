@@ -24,7 +24,9 @@ class NoiseAgent():
                  initial_ask, 
                  start_time,
                  terminal_time,
-                 priority 
+                 priority,
+                 fall_back_volume, 
+                 default_waiting_time=1e-6
                  ):
         """"    
         Parameters:
@@ -71,17 +73,15 @@ class NoiseAgent():
         self.cancel_std = cancel_std
         self.volume_min = volume_min
         self.volume_max = volume_max
-
-        if initial_shape_file is None:
-            self.initial_shape = np.array([initial_shape]*self.initial_level)            
-        else:
-            shape = np.load(initial_shape_file) 
-            self.initial_shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf)      
+        
+        # we use this if both sides become empty 
+        self.fall_back_volume = fall_back_volume
 
         self.agent_id = 'noise_agent'
 
         self.current_order = None 
         self.waiting_time = None 
+        self.default_waiting_time = default_waiting_time
         self.start_time = start_time
         self.terminal_time = terminal_time
 
@@ -156,19 +156,35 @@ class NoiseAgent():
 
         # handling of nan best bid price 
         if np.isnan(best_bid_price):
+            # volume = self.initial_shape[0]
+            # if volume is None:
+            #     raise ValueError('volume is None')
             if np.isnan(best_ask_price):
                 # bid and ask are nan 
-                order = LimitOrder(agent_id=self.agent_id, side='bid', price=self.initial_bid, volume=self.initial_shape[0], time=time)
+                order = LimitOrder(agent_id=self.agent_id, side='bid', price=self.initial_bid, volume=self.fall_back_volume, time=time)
                 print('both bid and ask are nan')
             else:
                 # bid is nan, ask is not nan
-                order = LimitOrder(agent_id=self.agent_id, side='bid', price=best_ask_price-1, volume=self.initial_shape[0], time=time)
+                volume = lob.price_volume_map['ask'][best_ask_price]
+                order = LimitOrder(agent_id=self.agent_id, side='bid', price=best_ask_price-1, volume=volume, time=time)
                 print('bid is nan')
+            self.waiting_time = self.default_waiting_time
+            # Assign a value to self.waiting_time
+            # if order.volume is None:
+            #     raise ValueError('order is None')
             return [order]
         if np.isnan(best_ask_price):
             # ask is nan, bid is not nan 
-            order = LimitOrder(agent_id=self.agent_id, side='ask', price=best_bid_price+1, volume=self.initial_shape[0], time=time)
+            # volume = self.initial_shape[0]
+            # if volume is None:
+            #     raise ValueError(f'volume is None, initial shape is {self.initial_shape[0]}')
+
+            volume = lob.price_volume_map['bid'][best_bid_price]
+            # assert volume is not None 
+            order = LimitOrder(agent_id=self.agent_id, side='ask', price=best_bid_price+1, volume=volume, time=time)
             print('ask is nan')
+            # TODO: create better logic here 
+            self.waiting_time = self.default_waiting_time
             return [order]
 
         assert len(bid_volumes) == len(ask_volumes), 'bid and ask volumes must have the same length'
@@ -286,6 +302,9 @@ class NoiseAgent():
                 level = self.np_random.choice(np.arange(1, self.level+1), p=probability)       
                 price = best_bid_price + level
             order = CancellationByPriceVolume(agent_id=self.agent_id, side=side, price=price, volume=volume, time=time)
+
+        if order.volume is None:
+            raise ValueError('order is None')
 
         return [order]
 
@@ -825,7 +844,7 @@ class InitialAgent():
         self.agent_id = 'initial_agent'
         self.n_inital_levels = n_initial_levels
         if initial_shape_file is None:
-            self.initial_shape = np.array([initial_shape]*self.n_initial_levels) 
+            self.initial_shape = np.array([initial_shape]*n_initial_levels) 
         else:
             shape = np.load(initial_shape_file)
             self.initial_shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf)      
@@ -856,6 +875,53 @@ class InitialAgent():
 
     def reset(self):
         return None
+
+
+
+class TestAgent():
+    def __init__(self, start_time=-1, terminal_time=4, time_delta=1, priority=1, fills=True):
+        self.start_time = start_time
+        self.terminal_time = terminal_time
+        self.time_delta = time_delta
+        self.agent_id = 'test_agent'
+        self.priority = priority
+        self.fills = fills 
+        return None
+    
+    def generate_order(self, lob, time):
+        assert time >= self.start_time
+        if time == self.start_time:
+            orders = []
+            orders.append(LimitOrder(self.agent_id, 'bid', 100, 1, time))
+            orders.append(LimitOrder(self.agent_id, 'ask', 101, 1, time))
+            return orders
+        elif time <= self.terminal_time:
+            best_bid = lob.get_best_price('bid')
+            orders = []
+            if self.fills:
+                orders.append(MarketOrder(self.agent_id, 'ask', 2, time))
+                orders.append(LimitOrder(self.agent_id, 'bid', best_bid+1, 1, time))
+                orders.append(LimitOrder(self.agent_id, 'ask', best_bid+2, 1, time))
+            else:
+                orders.append(LimitOrder(self.agent_id, 'bid', best_bid, 1, time))
+            return orders
+        else:
+            raise ValueError('should not happen')
+    
+    def new_event(self, time, event):
+        assert event == self.agent_id
+        assert time >= self.start_time
+        assert time <= self.terminal_time
+        if time < self.terminal_time:
+            return (time+self.time_delta, self.priority, self.agent_id)
+        else:
+            return None
+    
+    def initial_event(self):
+        return (self.start_time, self.priority, self.agent_id)
+    
+    def reset(self):
+        pass 
 
 
 

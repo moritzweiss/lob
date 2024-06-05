@@ -24,8 +24,10 @@ class Order:
 class LimitOrder(Order):
     def __init__(self, agent_id, side, price, volume, time):
         super().__init__(agent_id, 'limit', time)
+        if volume is None:
+            raise ValueError(f"volume is None for order at time={time}, sides={side}, agent={agent_id}")
         assert side in ['bid', 'ask'], "side must be bid or ask"
-        assert volume > 0, "volume must be positive"
+        assert volume > 0, f"volume must be positive, side={side}, volume={volume}, agent_id={agent_id}, price={price}, time={time}"
         self.side = side
         self.price = price
         self.volume = volume
@@ -364,10 +366,11 @@ class LimitOrderBook:
                 assert diff >= 0
                 break
         if remaining_market_volume > 0:
-            warnings.warn("market volume not fully executed")
-            print(f'order time: {order.time}')
-            print(f'bid volumes: {self.level2("bid")[1][:10]}')
-            print(f'ask volumes: {self.level2("ask")[1]}')
+            warnings.warn("market volume not fully executed\n"
+                          f"order time: {order.time}\n"
+                          f"order volume: {order.volume}\n"
+                          f"bid volumes: {self.level2('bid')[1][:10]}\n"
+                          f"ask volumes: {self.level2('ask')[1][:10]}")
         if self.only_volumes:
             return None
 
@@ -421,8 +424,12 @@ class LimitOrderBook:
                 break
         
         # basic checks 
+        # warnings.warn(f"{order}, market volume not fully executed")
         if market_volume > 0.0: 
-            print('market volume not fully executed')
+            warnings.warn(f"{order}, market volume not fully executed")
+            # print(f'order time: {order.time}')
+            # print(f'bid volumes: {self.level2("bid")[1][:10]}')
+            # print(f'ask volumes: {self.level2("ask")[1][:10]}')
         if market_volume < 0:
             raise ValueError("filled volume cannot be negative")
         

@@ -5,7 +5,8 @@ import os
 # parent = os.path.dirname(current)
 # sys.path.append(parent)
 from limit_order_book.limit_order_book import LimitOrder, MarketOrder, CancellationByPriceVolume, Cancellation, LimitOrderBook
-from agents import ExecutionAgent, LinearSubmitLeaveAgent
+from agents import ExecutionAgent, LinearSubmitLeaveAgent, TestAgent
+from queue import PriorityQueue
 
 # import numpy as np
 # from config.config import config
@@ -167,14 +168,14 @@ def test_linear_sl_agent():
     # orders of size 2 at times 0,1,2,...,9
     # sell remaining position at terminal time = 10
     volume = 20
-    LSL = LinearSubmitLeaveAgent(volume=volume, start_time=0, terminal_time=10, time_delta=1)
+    LSL = LinearSubmitLeaveAgent(volume=volume, start_time=0, terminal_time=10, time_delta=1, priority=0)
     LOB = LimitOrderBook(list_of_agents=['noise_agent', LSL.agent_id], level=5, only_volumes=False)
     # one order on the bid side 
     order_list = []
     order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100, volume=volume, time=0))
     LOB.process_order_list(order_list)
     # agent sends order to bid+1
-    order = LSL.generate_order(LOB.time, LOB)
+    order = LSL.generate_order(time=LOB.time, lob=LOB)
     msg = LOB.process_order_list(order)
     LSL.update_position_from_message_list(msg)
     # market order depletes agent offer 
@@ -190,7 +191,7 @@ def test_linear_sl_agent():
         order_list.append(CancellationByPriceVolume(side='bid', agent_id='noise_agent', price=100+time-1, volume=volume, time=time))
         msg = LOB.process_order_list(order_list)
         # l_sl agent sends order 
-        order = LSL.generate_order(LOB.time, LOB)
+        order = LSL.generate_order(time=LOB.time, lob=LOB)
         msg = LOB.process_order_list(order)
         LSL.update_position_from_message_list(msg)
         # market order which fills l_sl 
@@ -207,7 +208,7 @@ def test_linear_sl_agent_no_fills():
     # Note the order book time can only change through an actual order. 
     # otherwise it just stays the same
     # could update this going forward 
-    Agent = LinearSubmitLeaveAgent(volume=5, start_time=0, terminal_time=5, time_delta=1)
+    Agent = LinearSubmitLeaveAgent(volume=5, start_time=0, terminal_time=5, time_delta=1, priority=0)
     LOB = LimitOrderBook(list_of_agents=['noise_agent', Agent.agent_id], level=5, only_volumes=False)
     order_list = []
     order_list.append(LimitOrder(side='bid', agent_id='noise_agent', price=100, volume=1, time=0)) 
@@ -218,12 +219,45 @@ def test_linear_sl_agent_no_fills():
         order = LimitOrder(side='bid', agent_id='noise_agent', price=100-time-1, volume=1, time=time)
         LOB.process_order(order)
         # 
-        order = Agent.generate_order(time, LOB)
+        order = Agent.generate_order(time=time, lob=LOB)
         msg = LOB.process_order_list(order)
         Agent.update_position_from_message_list(msg)
     assert Agent.cummulative_reward == (100+99+98+97+96 - 5*100)/5
     # bids at 100, 100-1, ..., 100-5
     return None 
+
+def test_linear_sl_agent_with_pq_all_fills(fills=False):
+    agents = {}
+    agent = TestAgent(fills=fills)
+    agents[agent.agent_id] = agent
+    agent = LinearSubmitLeaveAgent(volume=4, start_time=0, terminal_time=4, time_delta=1, priority=0)
+    agents[agent.agent_id] = agent
+    for agent_id in agents:
+        agents[agent_id].reset()
+    LOB = LimitOrderBook(list_of_agents=[agent_id for agent_id in agents], level=5, only_volumes=False)
+    pq = PriorityQueue()
+    for agent_id in agents:
+        out = agents[agent_id].initial_event()
+        pq.put(out)
+    time = -1
+    while not pq.empty():
+        time, _, event = pq.get()        
+        # TODO: investigate whether: generate_order and new_event could be done at the same time !!!
+        orders = agents[event].generate_order(lob=LOB, time=time)
+        msgs = LOB.process_order_list(orders)
+        _, terminated = agents['linear_sl_agent'].update_position_from_message_list(msgs)
+        if terminated:
+            break
+        out = agents[event].new_event(time, event)
+        if out is not None:
+            pq.put(out)
+    if fills:
+        assert agents['linear_sl_agent'].cummulative_reward == (101+102+103+104 - 4*100)/4
+    else:
+        assert agents['linear_sl_agent'].cummulative_reward == (4*100 - 4*100)/4
+    return None
+
+
 
 
 test_market_order()
@@ -234,4 +268,5 @@ test_cancellation()
 test_dynamic()
 test_linear_sl_agent()
 test_linear_sl_agent_no_fills()
+test_linear_sl_agent_with_pq_all_fills()
 

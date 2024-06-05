@@ -42,6 +42,7 @@ noise_agent_config['volume_min'] = 1
 noise_agent_config['volume_max'] = 20
 noise_agent_config['unit_volume'] = True
 noise_agent_config['level'] = 30 
+noise_agent_config['fall_back_volume'] = None 
 # 
 noise_agent_config['initial_shape'] = None
 noise_agent_config['initial_shape_file'] = None 
@@ -49,6 +50,7 @@ noise_agent_config['initial_shape_file'] = None
 noise_agent_config['damping_factor'] = 0.75
 noise_agent_config['imbalance_reaction'] = False
 noise_agent_config['imbalance_factor'] = 2.0
+noise_agent_config['default_waiting_time'] = 1e-6
 
 # 
 noise_agent_config['rng'] = np.random.default_rng(0)

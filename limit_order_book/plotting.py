@@ -68,7 +68,7 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     plt.scatter(trades[trades.sell>0].time.values, level2.best_bid_price[trades.sell>0], color='black', marker='v', s= (scale/M)*trades[trades.sell>0].sell.values)
     
     plt.xlim(time[0],time[-1])
-    plt.ylim(995,1008)
+    plt.ylim(995,1005)
     
     # handles, labels = plt.gca().get_legend_handles_labels()
     # Set x and y tick size
@@ -179,8 +179,6 @@ def plot_prices(level2, trades, marker_size=50):
 
 
     
-    return None 
-
 
 
 def plot_level2_order_book(bid_prices, ask_prices, bid_volumes, ask_volumes, n):

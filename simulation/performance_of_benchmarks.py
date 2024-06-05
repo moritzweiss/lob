@@ -22,10 +22,10 @@ class Market():
         
         # initial agent         
         if market_env == 'noise':
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
+            initial_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
         else:
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
-            # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
+            # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
+            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
@@ -34,6 +34,7 @@ class Market():
         noise_agent_config['unit_volume'] = False
         noise_agent_config['terminal_time'] = 150
         noise_agent_config['start_time'] = 0 
+        noise_agent_config['fall_back_volume'] = 5
         # TODO: make start time more consistent 
         if market_env == 'noise':
             noise_agent_config['imbalance_reaction'] = False
@@ -76,7 +77,6 @@ class Market():
             agent = LinearSubmitLeaveAgent(**linear_sl_agent_config)
         self.agents[agent.agent_id] = agent
         self.execution_agent_id = agent.agent_id
-
         return None 
 
 
@@ -150,29 +150,31 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
     return all_rewards, passive_fills, n_events
 
 
-# start_time = time.time()
-# rewards, fill_rates, n_events = rollout(seed=0, num_episodes=10, execution_agent='market_agent', market_type='flow', volume=10)
-# end_tine = time.time()
-# execution_time = end_tine - start_time
-# print("Execution time:", execution_time)
-# print(rewards)
-# print(fill_rates)
-
-# n_samples = 100
-# n_cpus = 10
-# agent = 'linear_sl_agent'
-# env = 'strategic'
-# lots = 40
-# start_time = time.time()
-# rewards, fill_rates, n_events = mp_rollout(n_samples, n_cpus, agent, env, lots)
-# end_time = time.time()
-# execution_time = end_time - start_time
-# print("Execution time:", execution_time)
-# print(rewards)
-# print(fill_rates)
-
-
 if __name__ == '__main__':
+
+    start_time = time.time()
+    rewards, fill_rates, n_events = rollout(seed=0, num_episodes=10, execution_agent='sl_agent', market_type='flow', volume=10)
+    end_tine = time.time()
+    execution_time = end_tine - start_time
+    print("Execution time:", execution_time)
+    print(rewards)
+    print(fill_rates)
+
+    # n_samples = 100
+    # n_cpus = 10
+    # agent = 'linear_sl_agent'
+    # env = 'strategic'
+    # lots = 40
+    # start_time = time.time()
+    # rewards, fill_rates, n_events = mp_rollout(n_samples, n_cpus, agent, env, lots)
+    # end_time = time.time()
+    # execution_time = end_time - start_time
+    # print("Execution time:", execution_time)
+    # print(rewards)
+    # print(fill_rates)
+
+
+
     envs = ['noise', 'flow', 'strategic']
     n_samples = 1000
     n_cpus = 70
