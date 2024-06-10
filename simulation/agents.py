@@ -87,6 +87,8 @@ class NoiseAgent():
 
         self.priority = priority
 
+        self.n_events = None 
+
         return None  
     
     def reset_random_seet(self, rng):      
@@ -343,6 +345,7 @@ class NoiseAgent():
         waiting_time = self.waiting_time
         # just for safety reasons. to ensure that waiting time is set again
         self.waiting_time = None
+        self.n_events += 1
         return (time+waiting_time, self.priority, self.agent_id)
     
     def initial_event(self):
@@ -358,6 +361,7 @@ class NoiseAgent():
         return (self.start_time, self.priority, self.agent_id)
 
     def reset(self):
+        self.n_events = 0
         pass 
 
 class ExecutionAgent():
@@ -925,3 +929,28 @@ class TestAgent():
 
 
 
+class ObservationAgent():
+    def __init__(self, start_time, time_delta, terminal_time, priority, agent_id):
+        self.start_time = start_time
+        self.time_delta = time_delta
+        self.terminal_time = terminal_time
+        self.priority = priority
+        self.agent_id = agent_id
+    
+    def reset(self):
+        pass
+    
+    def generate_order(self, lob, time):
+        return None
+    
+    def initial_event(self):
+        return (self.start_time, self.priority, self.agent_id)
+    
+    def new_event(self, time, event):
+        assert time >= self.start_time
+        assert time <= self.terminal_time
+        assert event == self.agent_id
+        if time < self.terminal_time:
+            return (time+self.time_delta, self.priority, self.agent_id)
+        else:
+            return None
