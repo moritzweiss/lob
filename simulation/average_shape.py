@@ -127,12 +127,14 @@ def plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=10):
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv, askv, level=level, file_name=f'noise', title='noise', ax=axs)
     fig.tight_layout()
-    fig.savefig('plots/average_shape.pdf', dpi=350)
+    fig.savefig('plots/average_shape_noise.pdf', dpi=350)
     # 
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv_imb, askv_imb, level=10, file_name=f'noise_flow', title=f'noise+flow', ax=axs)        
     fig.tight_layout()
-    fig.savefig('plots/average_shape_imbalance.pdf', dpi=350)
+    fig.savefig('plots/average_shape_flow.pdf', dpi=350)
+    # 
+    print('saved average shape plots')
 
 def plot_mid_price_changes(midp_diff, midp_diff_imb):
     plt.figure(figsize=(10, 6))
@@ -168,5 +170,5 @@ if __name__ == '__main__':
     # print(f"Execution time: {end_time - start_time} seconds")
     # #####    
     plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=30)
-    trades_hist(trades, trades_imb)
-    plot_mid_price_changes(midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
+    # trades_hist(trades, trades_imb)
+    # plot_mid_price_changes(midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
