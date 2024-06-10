@@ -152,13 +152,13 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
 
 if __name__ == '__main__':
 
-    start_time = time.time()
-    rewards, fill_rates, n_events = rollout(seed=0, num_episodes=10, execution_agent='sl_agent', market_type='flow', volume=10)
-    end_tine = time.time()
-    execution_time = end_tine - start_time
-    print("Execution time:", execution_time)
-    print(rewards)
-    print(fill_rates)
+    # start_time = time.time()
+    # rewards, fill_rates, n_events = rollout(seed=0, num_episodes=10, execution_agent='sl_agent', market_type='flow', volume=10)
+    # end_tine = time.time()
+    # execution_time = end_tine - start_time
+    # print("Execution time:", execution_time)
+    # print(rewards)
+    # print(fill_rates)
 
     # n_samples = 100
     # n_cpus = 10
@@ -185,13 +185,13 @@ if __name__ == '__main__':
         for agent in ['sl_agent', 'linear_sl_agent']:
             results[f'{agent}_reward_mean'] = []
             results[f'{agent}_reward_std'] = []
-            results[f'{agent}_fill_rate'] = []
+            results[f'{agent}_pfill_rate'] = []
             results[f'{agent}_n_events'] = []
             for env in envs:
                 rewards, fill_rate, n_events = mp_rollout(n_samples, n_cpus, agent, env, lots)
                 results[f'{agent}_reward_mean'].append(np.mean(rewards))
                 results[f'{agent}_reward_std'].append(np.std(rewards))
-                results[f'{agent}_fill_rate'].append(np.mean(fill_rate))
+                results[f'{agent}_pfill_rate'].append(np.mean(fill_rate))
                 results[f'{agent}_n_events'].append(np.mean(n_events))
         end_time = time.time()
         results = pd.DataFrame.from_dict(results).round(2)
