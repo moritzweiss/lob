@@ -110,4 +110,13 @@ initial_agent_config['initial_ask'] = 1001
 initial_agent_config['n_initial_levels'] = 30
 initial_agent_config['initial_shape'] = None 
 initial_agent_config['initial_shape_file'] = None
-initial_agent_config['priority'] = -1
+initial_agent_config['priority'] = -2
+
+# 
+observation_agent_config = {}
+observation_agent_config['priority'] = -1
+observation_agent_config['agent_id'] = 'observation_agent'
+observation_agent_config['start_time'] = 0
+observation_agent_config['terminal_time'] = 150
+observation_agent_config['time_delta'] = 15
+
