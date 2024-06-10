@@ -63,8 +63,8 @@ class Market():
         self.lob = LimitOrderBook(list_of_agents=list_of_agents, level=30, only_volumes=False)
         for agent_id in list_of_agents:
             self.agents[agent_id].reset()            
-        if 'strategic_agent' in self.agents:
-            self.agents['strategic_agent'].direction = 'sell'
+        # if 'strategic_agent' in self.agents:
+        #     self.agents['strategic_agent'].direction = 'sell'
         self.pq = PriorityQueue()
         for agent_id in self.agents:
             out = self.agents[agent_id].initial_event()
@@ -154,26 +154,31 @@ if __name__ == '__main__':
     # results.to_csv(f'results/benchmarks_{lots}.csv')
     # Plot histogram of drifts for noise and flow
     plt.figure(figsize=(10, 6))
-    sns.kdeplot(data_for_plot['noise'], fill=False, label='Noise')
-    sns.kdeplot(data_for_plot['flow'], fill=False, label='Flow')
-    sns.kdeplot(data_for_plot['strategic'], fill=False, label='Strategic')
-    plt.legend()
-    plt.grid(True)
-    plt.xlabel('mid price drift')
     plt.tight_layout()
-    plt.xlim(-10, 10)
-    plt.savefig('histogram.pdf')
+    sns.kdeplot(data_for_plot['noise'], fill=False, label='Noise', bw_adjust=12)
+    sns.kdeplot(data_for_plot['flow'], fill=False, label='Flow', bw_adjust=12)
+    sns.kdeplot(data_for_plot['strategic'], fill=False, label='Strategic', bw_adjust=12)
+    plt.grid(True)
+    plt.xlabel('mid price drift', fontsize=16)
+    plt.xlim(-15, 15)
+    plt.xticks(np.arange(-15, 16, 5))
+    plt.legend(fontsize=12)
+    plt.savefig('plots/mid_price_drift_density.pdf')
     # Plot histogram of trades for each market type
     plt.figure(figsize=(10, 6))
-    sns.histplot(data_for_trade_plot['noise'], kde=True, label='Noise')
-    sns.histplot(data_for_trade_plot['flow'], kde=True, label='Flow')
-    sns.histplot(data_for_trade_plot['strategic'], kde=True, label='Strategic')
-    plt.legend()
+    # sns.histplot(data_for_trade_plot['noise'], bins=20, color='blue', kde=False, label='Noise', alpha=0.5)
+    # sns.histplot(data_for_trade_plot['flow'], bins=20, color='orange', kde=False, label='Flow', alpha=0.5)
+    # sns.histplot(data_for_trade_plot['strategic'], bins=20, color='green', kde=False, label='Strategic', alpha=0.5)
+    sns.kdeplot(data_for_trade_plot['noise'], fill=False, label='Noise', bw_adjust=3, clip=(0, 150))
+    sns.kdeplot(data_for_trade_plot['flow'], fill=False, label='Flow', bw_adjust=3, clip=(0, 150))
+    sns.kdeplot(data_for_trade_plot['strategic'], fill=False, label='Strategic', bw_adjust=3, clip=(0, 150))
+    plt.legend(fontsize=12)
+    plt.xlim(0, 150)
     plt.grid(True)
-    plt.xlabel('Number of Trades')
+    plt.xlabel('Number of Trades', fontsize=16)
     plt.ylabel('Frequency')
     plt.tight_layout()
-    plt.savefig('histogram_trades.pdf')
+    plt.savefig('plots/histogram_trades.pdf')
 
 
 
