@@ -625,10 +625,13 @@ class RLAgent(ExecutionAgent):
         - generate list of orders from an action
         - return the list of orders
         """
+        assert self.start_time <= time <= self.terminal_time
+        assert (time-self.start_time) % self.time_delta == 0, 'time must be divisible by time delta'
+
         if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid') 
         
-        if time >= self.start_time and time < self.terminal_time and time % self.frequency == 0:
+        if time >= self.start_time and time < self.terminal_time:
 
             best_bid = lob.get_best_price('bid')
 
@@ -659,7 +662,9 @@ class RLAgent(ExecutionAgent):
             
             # current volumes contains levels l1, l2, l3, >=l4
             current_volumes = self.volume_per_level
-            current_volumes.extend([self.volume - self.active_volume + cancelled_volume]) 
+            # this appends the incactive volume 
+            current_volumes.append(self.volume - self.active_volume + cancelled_volume) 
+            # placeholder for market order 
             current_volumes.insert(0, 0)
 
             l = 0 
@@ -700,91 +705,85 @@ class RLAgent(ExecutionAgent):
             return None 
     
     def get_observation(self, time, lob):        
-        best_bid = lob.get_best_price(side='bid')
+        best_bid = lob.data.best_bid_prices[-1]
         volume_per_level = []
         orders_within_range = set()
         #TODO: remove the hard coding of levels here 
+        # 1,2,3
+        # this loop counts how many orders are on each level, saves orders up to a certain level 
         for level in range(1, 4):
-            # 1,2,3
             orders_on_level = 0
             if best_bid+level in lob.price_map['ask']:
                 for order_id in lob.price_map['ask'][best_bid+level]:
+                    # TODO: can we make this more efficent. check for order location already when the order enters the book. 
+                    # carry a separate dict in LOB which tracks orders of the agent, its position, and queue position 
                     if lob.order_map[order_id].agent_id == self.agent_id:                        
-                        orders_on_level += lob.order_map[order_id].volume
-                        orders_within_range.add(order_id)
+                        orders_on_level += lob.price_volume_map['ask'][best_bid+level]
+                        orders_within_range.add(order_id)                    
                 volume_per_level.append(orders_on_level)
             else:
                 volume_per_level.append(0)
         # append volumes on levels >=4
         volume_per_level.append(self.active_volume-sum(volume_per_level))
-        assert sum(volume_per_level) == self.active_volume
-        # append volumes that are inactive 
-        # volume_per_level.append(self.volume-self.active_volume)
-        assert sum(volume_per_level) == self.active_volume
         self.orders_within_range = orders_within_range
         self.volume_per_level = volume_per_level
         assert sum(self.volume_per_level) <= self.volume
+        assert sum([v < 0 for v in volume_per_level]) == 0 
+        # assert sum(volume_per_level) == self.active_volume
+        # append volumes that are inactive 
+        # volume_per_level.append(self.volume-self.active_volume)
+        # assert sum(volume_per_level) == self.active_volume
         # 
-        if time == 0:
-            bid_move = 0
-        else:
-            bid_move = (best_bid - self.reference_bid_price)/10
-        spread = (lob.get_best_price('ask') - best_bid)/10
-        _, bid_v = lob.level2('bid')
-        _, ask_v = lob.level2('ask')
+        # if time == 0:
+        #     bid_move = 0
+        # else:
+        #     bid_move = (best_bid - self.reference_bid_price)/10
+        # spread = (lob.get_best_price('ask') - best_bid)/10
+        # _, bid_v = lob.level2('bid')
+        # _, ask_v = lob.level2('ask')
 
         # probably a good idea to make this unit less. 
         # should also take imbalances     
-        bid_v = bid_v[:3]/np.array([5,10,20])
-        ask_v = ask_v[:3]/np.array([5,10,20])   
+        # bid_v = bid_v[:3]/np.array([5,10,20])
+        # ask_v = ask_v[:3]/np.array([5,10,20])   
 
-        volume_per_level = np.array(volume_per_level, dtype=np.float32)/self.initial_volume
+        # volume_per_level = np.array(volume_per_level, dtype=np.float32)/self.initial_volume
 
-        out = np.array([time/self.terminal_time, self.volume/self.initial_volume, self.active_volume/self.initial_volume, (self.volume-self.active_volume)/self.initial_volume, bid_move, spread], dtype=np.float32)
+        # out = np.array([time/self.terminal_time, self.volume/self.initial_volume, self.active_volume/self.initial_volume, (self.volume-self.active_volume)/self.initial_volume, bid_move, spread], dtype=np.float32)
 
-        out = np.concatenate([out, volume_per_level, bid_v, ask_v], dtype=np.float32)
+        # out = np.concatenate([out, volume_per_level, bid_v, ask_v], dtype=np.float32)
 
         # add 4th level imbalance
-        if np.sum(bid_v[:6]) + np.sum(ask_v[:6]) == 0:
-            # print('zero bid/ask volumes')
-            # print(bid_v[:4])
-            # print(ask_v[:4])            
-            imbalance = 0
-        else:
-            # print('zero bid/ask volumes')
-            # print(bid_v[:4])
-            # print(ask_v[:4])       
-            imbalance = (np.sum(bid_v[:6]) - np.sum(ask_v[:6]))/(np.sum(bid_v[:6]) + np.sum(ask_v[:6]))
-        imbalance = np.array([imbalance], dtype=np.float32)
+        # if np.sum(bid_v[:6]) + np.sum(ask_v[:6]) == 0:
+        #     # print('zero bid/ask volumes')
+        #     # print(bid_v[:4])
+        #     # print(ask_v[:4])            
+        #     imbalance = 0
+        # else:
+        #     # print('zero bid/ask volumes')
+        #     # print(bid_v[:4])
+        #     # print(ask_v[:4])       
+        #     imbalance = (np.sum(bid_v[:6]) - np.sum(ask_v[:6]))/(np.sum(bid_v[:6]) + np.sum(ask_v[:6]))
+        # imbalance = np.array([imbalance], dtype=np.float32)
         # out = np.append(out, imbalance, dtype=np.float32)
-        out = np.concatenate([out, imbalance])
+        # out = np.concatenate([out, imbalance])
         # print(f'imbalance: {imbalance}')
 
         # 
-        return out 
+        return np.array([time/self.terminal_time, self.volume/self.initial_volume], dtype=np.float32) 
     
     def new_event(self, time, event):
+        assert event == self.agent_id
         assert time >= self.start_time
         assert time <= self.terminal_time
         assert time % self.time_delta == 0
         if time < self.terminal_time-self.time_delta:
-            if event == 'rl_agent_observation':
-                return (time, 0, 'rl_agent_action')
-            elif event == 'rl_agent_action':
-                return (time+self.time_delta, 0, 'rl_agent_observation')            
-            else:
-                raise ValueError(f'Unknown event {event}')
-        elif time == self.terminal_time-self.time_delta:
-            if event == 'rl_agent_observation':
-                return (time, 0, 'rl_agent_action')
-            elif event == 'rl_agent_action':
-                assert time + self.time_delta == self.terminal_time
-                return (time+self.time_delta, 0, 'rl_agent_action')
-            else:
-                raise ValueError(f'Unknown event {event}')
+            return (time+self.time_delta, self.priority, self.agent_id)
+        else:
+            return None
 
     def initial_event(self):
-        return (self.start_time, 0, 'rl_agent_observation')
+        return (self.start_time, self.priority, self.agent_id)
                 
 class StrategicAgent():
     """
@@ -880,8 +879,6 @@ class InitialAgent():
     def reset(self):
         return None
 
-
-
 class TestAgent():
     def __init__(self, start_time=-1, terminal_time=4, time_delta=1, priority=1, fills=True):
         self.start_time = start_time
@@ -926,8 +923,6 @@ class TestAgent():
     
     def reset(self):
         pass 
-
-
 
 class ObservationAgent():
     def __init__(self, start_time, time_delta, terminal_time, priority, agent_id):
