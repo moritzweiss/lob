@@ -14,15 +14,37 @@ import gymnasium as gym
 
 
 class Market(gym.Env):
-    def __init__(self, market_env='noise', execution_agent='sl_agent', volume=10, seed=0, observation_agent=True):
+    # TODO: - seed depending on worker index 
+    # - observation agent conditional on presence of rl agent 
+    def __init__(self, config):
+
+        """
+        - config should have keys market_env, execution_agent, volume, seed
+        - we use a config, becuase this is required by rl lib 
+        - seed will be set dependinng on whether we use multiple workers or not 
+        """
+
+        assert 'market_env' in config
+        assert 'execution_agent' in config
+        assert 'volume' in config
+        assert 'seed' in config
+
+
+        # seed handling 
+        if 'worker_index' in config:
+            seed = config['seed'] + config['worker_index']
+        else:
+            seed = config['seed']
+
+        # market_env='noise', execution_agent='sl_agent', volume=10, seed=0
         
-        assert market_env in ['noise', 'flow', 'strategic']
-        assert execution_agent in ['market_agent', 'sl_agent', 'linear_sl_agent', 'rl_agent']
+        assert config['market_env'] in ['noise', 'flow', 'strategic']
+        assert config['execution_agent'] in ['market_agent', 'sl_agent', 'linear_sl_agent', 'rl_agent']
 
         self.agents = {}
         
         # initial agent         
-        if market_env == 'noise':
+        if config['market_env'] == 'noise':
             initial_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
         else:
             # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
@@ -30,8 +52,8 @@ class Market(gym.Env):
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
-        # observation agent
-        if observation_agent:
+        # observation agent if rl agent is present: this will interupt the kernel at some time interval 
+        if config['execution_agent'] == 'rl_agent':
             agent = ObservationAgent(**observation_agent_config)
             self.agents[agent.agent_id] = agent
 
@@ -42,7 +64,7 @@ class Market(gym.Env):
         noise_agent_config['start_time'] = 0 
         noise_agent_config['fall_back_volume'] = 5
         # TODO: make start time more consistent 
-        if market_env == 'noise':
+        if config['market_env'] == 'noise':
             noise_agent_config['imbalance_reaction'] = False
             agent = NoiseAgent(**noise_agent_config)
             self.agents[agent.agent_id] = agent
@@ -57,7 +79,7 @@ class Market(gym.Env):
             self.agents[agent.agent_id] = agent
 
         # strategic agent 
-        if market_env == 'strategic':
+        if config['market_env'] == 'strategic':
             strategic_agent_config['time_delta'] = 7.5
             strategic_agent_config['market_volume'] = 1
             strategic_agent_config['limit_volume'] = 1
@@ -66,18 +88,18 @@ class Market(gym.Env):
             self.agents[agent.agent_id] = agent 
 
         # execution agent
-        if execution_agent == 'market_agent':
+        if config['execution_agent'] == 'market_agent':
             sl_agent_config['start_time'] = 0
-            market_agent_config['volume'] = volume
+            market_agent_config['volume'] = config['volume']
             agent = MarketAgent(**market_agent_config)
-        elif execution_agent == 'sl_agent':
+        elif config['execution_agent'] == 'sl_agent':
             sl_agent_config['start_time'] = 0
-            sl_agent_config['volume'] = volume
+            sl_agent_config['volume'] = config['volume']
             sl_agent_config['terminal_time'] = 150
             agent = SubmitAndLeaveAgent(**sl_agent_config)
-        elif execution_agent == 'linear_sl_agent': 
+        elif config['execution_agent'] == 'linear_sl_agent': 
             linear_sl_agent_config['start_time'] = 0
-            linear_sl_agent_config['volume'] = volume
+            linear_sl_agent_config['volume'] = config['volume']
             linear_sl_agent_config['terminal_time'] = 150
             linear_sl_agent_config['time_delta'] = 15
             agent = LinearSubmitLeaveAgent(**linear_sl_agent_config)
@@ -85,15 +107,14 @@ class Market(gym.Env):
             rl_agent_config['start_time'] = 0
             rl_agent_config['terminal_time'] = 150
             rl_agent_config['time_delta'] = 15
-            rl_agent_config['volume'] = volume
+            rl_agent_config['volume'] = config['volume']
             agent = RLAgent(**rl_agent_config)
 
         self.agents[agent.agent_id] = agent
         self.execution_agent_id = agent.agent_id
-
-        # 
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(2,), dtype=np.float32)
-        self.action_space = gym.spaces.Box(low=-10, high=10, shape=(1,), dtype=np.float32)    
+        
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
+        self.action_space = gym.spaces.Box(low=-10, high=10, shape=(6,), dtype=np.float32)    
 
         return None 
 
@@ -112,14 +133,15 @@ class Market(gym.Env):
             out = self.agents[agent_id].initial_event()
             self.pq.put(out)
         # run up to first observation 
-        assert 'observation_agent' in self.agents
+        # assert 'observation_agent' in self.agents
         observation, reward, terminated, info = self.transition()
         # reference mid price 
-        # self.reference_mid_price = (self.lob.best_bid[-1] + self.lob.best_ask[-1])/2
         return observation, info 
     
     def step(self, action=None):
         observation, reward ,terminated, info = self.transition(action)
+        if terminated:
+            assert self.agents[self.execution_agent_id].volume == 0
         return observation, reward, terminated, False, info 
 
     def transition(self, action=None):
@@ -129,6 +151,8 @@ class Market(gym.Env):
         while not self.pq.empty(): 
             # n_events += 1
             time, _, agent_id = self.pq.get()
+            if time > self.agents[self.execution_agent_id].terminal_time:
+                raise ValueError("time is greater than execution agents terminal time")
             if agent_id == 'rl_agent':
                 orders = self.agents[agent_id].generate_order(lob=self.lob, time=time, action=action)
             else:
@@ -153,7 +177,8 @@ class Market(gym.Env):
                 'passive_fill_rate': self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume,                
                 'time': time,
                 # 'drift': (self.lob.data.best_bid_prices[-1] + self.lob.data.best_ask_prices[-1])/2 - self.reference_mid_price,
-                'n_events': self.agents['noise_agent'].n_events
+                'n_events': self.agents['noise_agent'].n_events,
+                # 'terminated': terminated
                 }
         # else:
         #     info = {}
@@ -163,27 +188,32 @@ class Market(gym.Env):
         return observation, reward, terminated, info 
 
 def test_rl_agent(num_episodes=10, seed=0, market_type='flow', volume=10):
-    M = Market(volume=volume, execution_agent='rl_agent', market_env=market_type, seed=seed)
+    config = {'seed': seed, 'market_env': market_type, 'execution_agent': 'rl_agent', 'volume': volume}
+    M = Market(config)
     for _ in range(num_episodes):
         M.reset()
         terminated = False
         while not terminated:
-            action = np.array([10,-10], dtype=np.float32)
+            action = np.array([-10, -10, 10, -10, -10], dtype=np.float32)
             observation, reward, terminated, truncated, info = M.step(action)
         print(info)
     return None 
 
 
 def rollout(seed, num_episodes, execution_agent, market_type, volume):
-    M = Market(volume=volume, execution_agent=execution_agent, market_env=market_type, seed=seed)
+    config = {'seed': seed, 'market_env': market_type, 'execution_agent': execution_agent, 'volume': volume}
+    M = Market(config)
     total_rewards = []
     times = []
     n_events = []
     for _ in range(num_episodes):
-        M.reset()
-        terminated = False
-        while not terminated:
-            observation, reward, terminated, truncated, info = M.step()
+        observation, info = M.reset()
+        if execution_agent == 'rl_agent':
+            # terminated = False
+            while not terminated:
+                action = np.array([-10, -10, 10, -10, -10], dtype=np.float32)
+                observation, reward, terminated, truncated, info = M.step(action)
+        # print(info)
         total_rewards.append(info['cum_reward'])
         times.append(info['time'])
         n_events.append(info['n_events'])
@@ -203,15 +233,15 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
 
 if __name__ == '__main__':
 
-    test_rl_agent(num_episodes=10, seed=0, market_type='flow', volume=10)
+    test_rl_agent(num_episodes=20, seed=0, market_type='noise', volume=20)
 
     start_time = time.time()
-    rewards, times, n_events = rollout(seed=0, num_episodes=10, execution_agent='sl_agent', market_type='flow', volume=10)
+    rewards, times, n_events = rollout(seed=0, num_episodes=10, execution_agent='linear_sl_agent', market_type='noise', volume=10)
     end_tine = time.time()
     execution_time = end_tine - start_time
     print("Execution time:", execution_time)
-    print(rewards)
-    print(times)
+    print(f'rewards: {rewards}')
+    print(f'times: {times}')
 
     # n_samples = 100
     # n_cpus = 10
@@ -228,7 +258,7 @@ if __name__ == '__main__':
 
     envs = ['noise', 'flow', 'strategic']
     n_samples = 10
-    n_cpus = 10
+    n_cpus = 2
     start_time = time.time()
     for lots in [10, 40]:
         # print(lots)

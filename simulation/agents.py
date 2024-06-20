@@ -471,7 +471,8 @@ class ExecutionAgent():
     
     def sell_remaining_position(self, lob, time):
         assert self.agent_id, 'agent id is not set' 
-        assert lob.order_map_by_agent[self.agent_id], 'agent has no orders in the book'
+        assert self.volume > 0, 'volume is 0'
+        # assert lob.order_map_by_agent[self.agent_id], 'agent has no orders in the book'
         # assert self.agent_id in lob.order_map_by_agent, 'agent has no orders in the book'
         order_list = []
         for order_id in lob.order_map_by_agent[self.agent_id]:
@@ -619,11 +620,15 @@ class RLAgent(ExecutionAgent):
         self.start_time = start_time
         self.terminal_time = terminal_time
         self.time_delta = time_delta
+        # v1, v2, v3, v>=4
+        self.n_lob_levels = 3 
+        # action length: market, l1, l2, l3, inactive
+        self.action_length = 5
             
     def generate_order(self, lob, time, action):
         """
-        - generate list of orders from an action
-        - return the list of orders
+            - generate list of orders from an action
+            - return the list of orders
         """
         assert self.start_time <= time <= self.terminal_time
         assert (time-self.start_time) % self.time_delta == 0, 'time must be divisible by time delta'
@@ -632,75 +637,68 @@ class RLAgent(ExecutionAgent):
             self.reference_bid_price = lob.get_best_price('bid') 
         
         if time >= self.start_time and time < self.terminal_time:
+            assert len(self.volume_per_level) >= len(action)-1
 
             best_bid = lob.get_best_price('bid')
+            action = np.exp(action)/np.sum(np.exp(action), axis=0)
 
-            action = np.exp(action) / np.sum(np.exp(action), axis=0)
-            # print(action.round(2))            
-            # keep track of total cancelled volume 
             cancelled_volume = 0
             order_list = []
             # self.orders_within_range is set in the get_observation function
-            # cancel orders that are not on levels >= l4 
+            # cancel orders that are on levels >= l4 
             orders_to_cancel = lob.order_map_by_agent[self.agent_id].difference(self.orders_within_range)
             for order_id in orders_to_cancel:
-                order_list.append(Cancellation(self.agent_id, order_id))
-                cancelled_volume += lob.order_map[order_id].volume
-            
+                order_list.append(Cancellation(self.agent_id, order_id, time))
+                cancelled_volume += lob.order_map[order_id].volume            
+            # last entry of self.volume_per_level contains volume on levels >= l4
             assert cancelled_volume == self.volume_per_level[-1]
             
-            # target volumes 
+            ### generate target volumes 
             target_volumes = []
             available_volume = self.volume 
             for l in range(len(action)):
-                # [market,l1 ,l2, ,l3, inactive]
+                # [market, l1 ,l2, ,l3, inactive]
                 # np.round rounds values in [0, 0.5] to 0, and values in [0.5, 1] to 1 
                 volume_on_level = min(np.round(action[l]*self.volume).astype(int), available_volume)
+                assert volume_on_level >= 0
                 available_volume -= volume_on_level
                 target_volumes.append(volume_on_level) 
+            # add any leftovers to the incactive level 
             target_volumes[-1] += available_volume
-            
-            # current volumes contains levels l1, l2, l3, >=l4
-            current_volumes = self.volume_per_level
-            # this appends the incactive volume 
-            current_volumes.append(self.volume - self.active_volume + cancelled_volume) 
-            # placeholder for market order 
-            current_volumes.insert(0, 0)
-
+            assert sum(target_volumes) == self.volume
+            # TODO: many of these statistics could be tracked directly in the order book ! 
             l = 0 
             m = 0 
-            # market_sells = []
-            for level in range(4): 
+            for level in range(len(action)-1): 
                 # 0, 1, 2, 3
                 if level == 0:
                     if target_volumes[level] > 0:
-                        order = MarketOrder(self.agent_id, 'bid', target_volumes[level])
+                        order = MarketOrder(self.agent_id, 'bid', target_volumes[level], time)
                         order_list.append(order)
-                        # market_sells.append(order)
                         m = target_volumes[level]
                 else:
-                    diff = target_volumes[level] - current_volumes[level]
+                    diff = target_volumes[level] - self.volume_per_level[level-1]
                     limit_price = best_bid+level
                     if diff > 0:
-                        order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, diff))
+                        order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, diff, time))
                         l += diff
                     elif diff < 0:
-                        order_list.insert(0, CancellationByPriceVolume(agent_id=self.agent_id, side='ask', price=limit_price, volume=-diff))
+                        order_list.insert(0, CancellationByPriceVolume(agent_id=self.agent_id, side='ask', price=limit_price, volume=-diff, time=time))
                         cancelled_volume += -diff
                     else:
                         pass
 
-            # new limit and market order must match the cancelled volume
+            assert cancelled_volume >= 0
             assert l >= 0
             assert m >= 0
-            assert self.volume >= self.active_volume >= cancelled_volume >= 0
-            free_budget = cancelled_volume + (self.volume - self.active_volume)
+            # cancelled + inactive == new free budget 
+            free_budget = cancelled_volume + (self.volume - self.active_volume) 
             assert 0 <= free_budget <= self.volume
             assert 0 <= l + m <= free_budget, 'l + m must be less than or equal to the free budget'
-            # target volumes[-1] = inactive = (volume - active volume) + cancelled - l - m 
-            assert target_volumes[-1] == (self.volume - self.active_volume) + cancelled_volume - l - m 
-            # TODO: create check to test validity of the order list
+            assert self.volume >= self.active_volume >= cancelled_volume >= 0
             return order_list
+        if time == self.terminal_time:
+            return self.sell_remaining_position(lob, time)
         else:
             return None 
     
@@ -713,17 +711,19 @@ class RLAgent(ExecutionAgent):
         # this loop counts how many orders are on each level, saves orders up to a certain level 
         for level in range(1, 4):
             orders_on_level = 0
-            if best_bid+level in lob.price_map['ask']:
-                for order_id in lob.price_map['ask'][best_bid+level]:
+            price = best_bid+level
+            if price in lob.price_map['ask']:
+                for order_id in lob.price_map['ask'][price]:
                     # TODO: can we make this more efficent. check for order location already when the order enters the book. 
                     # carry a separate dict in LOB which tracks orders of the agent, its position, and queue position 
-                    if lob.order_map[order_id].agent_id == self.agent_id:                        
-                        orders_on_level += lob.price_volume_map['ask'][best_bid+level]
+                    if lob.order_map[order_id].agent_id == self.agent_id:                                                
+                        orders_on_level += lob.order_map[order_id].volume
                         orders_within_range.add(order_id)                    
                 volume_per_level.append(orders_on_level)
             else:
                 volume_per_level.append(0)
         # append volumes on levels >=4
+        assert sum(volume_per_level) <= self.active_volume
         volume_per_level.append(self.active_volume-sum(volume_per_level))
         self.orders_within_range = orders_within_range
         self.volume_per_level = volume_per_level
@@ -777,7 +777,7 @@ class RLAgent(ExecutionAgent):
         assert time >= self.start_time
         assert time <= self.terminal_time
         assert time % self.time_delta == 0
-        if time < self.terminal_time-self.time_delta:
+        if time <= self.terminal_time-self.time_delta:
             return (time+self.time_delta, self.priority, self.agent_id)
         else:
             return None

@@ -117,6 +117,6 @@ observation_agent_config = {}
 observation_agent_config['priority'] = -1
 observation_agent_config['agent_id'] = 'observation_agent'
 observation_agent_config['start_time'] = 0
-observation_agent_config['terminal_time'] = 150
+observation_agent_config['terminal_time'] = 135
 observation_agent_config['time_delta'] = 15
 
