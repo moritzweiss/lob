@@ -620,10 +620,15 @@ class RLAgent(ExecutionAgent):
         self.start_time = start_time
         self.terminal_time = terminal_time
         self.time_delta = time_delta
-        # v1, v2, v3, v>=4
-        self.n_lob_levels = 3 
-        # action length: market, l1, l2, l3, inactive
-        self.action_length = 5
+        # v1, v2, v3
+        self.n_lob_levels = 3
+        # currently just time and volume as observations 
+        self.observation_space_length = self.n_lob_levels+1
+        self.observation_space_length = 2
+        # action length: market, l1, l2, l3, inactive: n_levels+market+inactive
+        self.action_space_length = 5
+        # action length = 5 --> 3 order book levels --> 3 levels observed: l1, l2, l3, inactive: 4 = 5-4 
+        assert self.n_lob_levels >= self.action_space_length-2
             
     def generate_order(self, lob, time, action):
         """
@@ -637,7 +642,7 @@ class RLAgent(ExecutionAgent):
             self.reference_bid_price = lob.get_best_price('bid') 
         
         if time >= self.start_time and time < self.terminal_time:
-            assert len(self.volume_per_level) >= len(action)-1
+            assert len(self.volume_per_level) >= len(action)-2
 
             best_bid = lob.get_best_price('bid')
             action = np.exp(action)/np.sum(np.exp(action), axis=0)
@@ -677,6 +682,8 @@ class RLAgent(ExecutionAgent):
                         order_list.append(order)
                         m = target_volumes[level]
                 else:
+                    # target volumes: market, l1, l2, ..., ln, inactive 
+                    # self.volumes_per_level: l1, l2, l3, ..., ln, l_>=n+1
                     diff = target_volumes[level] - self.volume_per_level[level-1]
                     limit_price = best_bid+level
                     if diff > 0:
@@ -709,7 +716,7 @@ class RLAgent(ExecutionAgent):
         #TODO: remove the hard coding of levels here 
         # 1,2,3
         # this loop counts how many orders are on each level, saves orders up to a certain level 
-        for level in range(1, 4):
+        for level in range(1, self.n_lob_levels+1):
             orders_on_level = 0
             price = best_bid+level
             if price in lob.price_map['ask']:

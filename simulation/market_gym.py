@@ -1,4 +1,9 @@
-from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, InitialAgent, ObservationAgent, RLAgent
+# import os, sys 
+# current_path = os.path.dirname(os.path.realpath(__file__))
+# parent_dir = os.path.dirname(current_path)
+# sys.path.append(parent_dir)
+
+from simulation.agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, InitialAgent, ObservationAgent, RLAgent
 from limit_order_book.limit_order_book import LimitOrderBook
 from config.config import noise_agent_config, strategic_agent_config, sl_agent_config, linear_sl_agent_config, market_agent_config, initial_agent_config, observation_agent_config, rl_agent_config
 import numpy as np
@@ -21,7 +26,7 @@ class Market(gym.Env):
         """
         - config should have keys market_env, execution_agent, volume, seed
         - we use a config, becuase this is required by rl lib 
-        - seed will be set dependinng on whether we use multiple workers or not 
+        - seed will be set depending on whether we use multiple workers or not 
         """
 
         assert 'market_env' in config
@@ -31,8 +36,24 @@ class Market(gym.Env):
 
 
         # seed handling 
-        if 'worker_index' in config:
-            seed = config['seed'] + config['worker_index']
+        # asser
+        # assert 'worker_index' in config, print(config)
+        # assert config.worker_index is not None 
+
+        # assert co
+        if hasattr(config, 'worker_index'):
+            print('####')
+            print('####')
+            print('####')
+            print('####')
+            print(f'worker_index: {config.worker_index}')
+            # print(f'num worker: {config.num_worker}')
+            print('####')
+            print('####')
+            print('####')
+            print('####')
+            seed = config['seed'] + config.worker_index
+            # print(f'WORKER INDEX IS: {config["worker_index"]}')
         else:
             seed = config['seed']
 
@@ -45,17 +66,12 @@ class Market(gym.Env):
         
         # initial agent         
         if config['market_env'] == 'noise':
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
+            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
         else:
-            # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
+            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
+            # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
-
-        # observation agent if rl agent is present: this will interupt the kernel at some time interval 
-        if config['execution_agent'] == 'rl_agent':
-            agent = ObservationAgent(**observation_agent_config)
-            self.agents[agent.agent_id] = agent
 
         # noise agent 
         noise_agent_config['rng'] = np.random.default_rng(seed)
@@ -112,14 +128,19 @@ class Market(gym.Env):
 
         self.agents[agent.agent_id] = agent
         self.execution_agent_id = agent.agent_id
-        
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
-        self.action_space = gym.spaces.Box(low=-10, high=10, shape=(6,), dtype=np.float32)    
+
+
+        # observation agent if rl agent is present: this will interupt the kernel at some time interval 
+        if config['execution_agent'] == 'rl_agent':
+            self.observation_space = gym.spaces.Box(low=0, high=1, shape=(agent.observation_space_length,), dtype=np.float32)
+            self.action_space = gym.spaces.Box(low=-10, high=10, shape=(agent.action_space_length,), dtype=np.float32)    
+            agent = ObservationAgent(**observation_agent_config)
+            self.agents[agent.agent_id] = agent
 
         return None 
 
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         self.lob = LimitOrderBook(list_of_agents=list(self.agents.keys()), level=30, only_volumes=False)
         # reset agents 
         for agent_id in self.agents:
@@ -146,7 +167,7 @@ class Market(gym.Env):
 
     def transition(self, action=None):
         terminated = False
-        reward = 0 
+        transition_reward = 0 
         # n_events = 0  
         while not self.pq.empty(): 
             # n_events += 1
@@ -160,7 +181,8 @@ class Market(gym.Env):
             # update order book, and check whether execution agent orders have been filled 
             if orders is not None:
                 msgs = self.lob.process_order_list(orders)
-                _, terminated = self.agents[self.execution_agent_id].update_position_from_message_list(msgs)
+                reward, terminated = self.agents[self.execution_agent_id].update_position_from_message_list(msgs)
+                transition_reward += reward
                 if terminated:
                     break
             # if not terminated or execution agent not present, generate a new event 
@@ -185,7 +207,7 @@ class Market(gym.Env):
         # observation = self.agents[self.execution_agent_id].cummulative_reward, self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume, n_events          
         # observation = (time/self.agents[self.execution_agent_id].terminal_time, self.agents[self.execution_agent_id].volume/self.agents[self.execution_agent_id].initial_volume)
         observation = self.agents[self.execution_agent_id].get_observation(time, self.lob)
-        return observation, reward, terminated, info 
+        return observation, transition_reward, terminated, info 
 
 def test_rl_agent(num_episodes=10, seed=0, market_type='flow', volume=10):
     config = {'seed': seed, 'market_env': market_type, 'execution_agent': 'rl_agent', 'volume': volume}
@@ -193,9 +215,14 @@ def test_rl_agent(num_episodes=10, seed=0, market_type='flow', volume=10):
     for _ in range(num_episodes):
         M.reset()
         terminated = False
+        episode_reward = 0 
         while not terminated:
             action = np.array([-10, -10, 10, -10, -10], dtype=np.float32)
             observation, reward, terminated, truncated, info = M.step(action)
+            episode_reward += reward
+            assert observation in M.observation_space
+        assert np.abs(episode_reward - info['cum_reward']) < 1e-6
+        # print(episode_reward)
         print(info)
     return None 
 
@@ -212,7 +239,10 @@ def rollout(seed, num_episodes, execution_agent, market_type, volume):
             # terminated = False
             while not terminated:
                 action = np.array([-10, -10, 10, -10, -10], dtype=np.float32)
+                assert action in M.action_space
                 observation, reward, terminated, truncated, info = M.step(action)
+                assert observation in M.observation_space
+                # action = M.o
         # print(info)
         total_rewards.append(info['cum_reward'])
         times.append(info['time'])
@@ -223,7 +253,8 @@ def rollout(seed, num_episodes, execution_agent, market_type, volume):
 def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
     samples_per_env = int(n_samples/n_cpus) 
     with Pool(n_cpus) as p:
-        out = p.starmap(rollout, [(seed, samples_per_env, execution_agent, market_type, volume) for seed in range(n_cpus)])    
+        # seed+1, in order to match worker_index
+        out = p.starmap(rollout, [(seed+1, samples_per_env, execution_agent, market_type, volume) for seed in range(n_cpus)])    
     all_rewards, times, n_events  = zip(*out)
     all_rewards = list(itertools.chain.from_iterable(all_rewards))
     times = list(itertools.chain.from_iterable(times))

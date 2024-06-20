@@ -6,19 +6,24 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 sys.path.append(current_dir)
 from ray import tune
-from simulation.all_markets_simulation import Market
+from simulation.market_gym import Market, mp_rollout
 import pandas as pd 
 import matplotlib.pyplot as plt
 import seaborn as sns
 from ray.rllib.algorithms.algorithm import Algorithm
-from simulation.test_vectorization import mp_rollout
+# from simulation.test_vectorization import mp_rollout
 import ray 
 
 ray.init()
+# print('finished')
 
-for n_lots in [10, 40]:
+lots = [10]
+envs = ['noise', 'flow']
+n_cpus = 10
+
+for n_lots in lots:
     # for env_type in ['strategic', 'flow', 'noise']:
-    for env_type in ['flow']:
+    for env_type in envs:
         print('##############')
         print(env_type)
         print(n_lots)
@@ -28,7 +33,6 @@ for n_lots in [10, 40]:
         data = {}
 
         # restore best agent 
-
         path = f'{parent_dir}/ray_results/{n_lots}_{env_type}'
         analysis = tune.ExperimentAnalysis(path)
         # analysis = tune.ExperimentAnalysis(path, default_metric="episode_reward_mean", default_mode="max")
@@ -39,28 +43,29 @@ for n_lots in [10, 40]:
         env_config = agent.evaluation_config.env_config
         print(f"env config for evalutation config is {env_config}")
         print(f"exploration is set to {agent.evaluation_config.explore}")
-
         out = agent.evaluate()
         ray.shutdown()
         rewards = out['evaluation']['hist_stats']['episode_reward'] 
-        print('rl')
+        print('RL RESULTS')
         print(f'mean: {np.mean(rewards)}')
         # print(out['evaluation']['hist_stats']['episode_reward_mean'] )
         print(f'std: {np.std(rewards)}')
 
         # data['E[rl]'] = np.mean(rewards)
         # data['Std[rl]'] = np.std(rewards)
+        
+        # seeding ??
+        rewards, _, _ = mp_rollout(n_samples=1000, n_cpus=n_cpus, execution_agent='sl_agent', market_type=env_config['market_env'], volume=env_config['volume'])
+        # sl = [x-1e-5 if x >=1 else x for x in sl]
+        print('SL RESULTS')
+        print(f'mean sl: {np.mean(rewards)}')
+        print(f'std sl: {np.std(rewards)}')
 
 
-        sl = mp_rollout(1000, 50, 'sl_agent', env_type, 1.0, n_lots)
-        sl = [x-1e-5 if x >=1 else x for x in sl]
-        print('sl')
-        print(f'mean sl: {np.mean(sl)}')
-        print(f'std sl: {np.std(sl)}')
-        l_sl = mp_rollout(1000, 50, 'linear_sl_agent', env_type, 1.0, n_lots)
-        print('linear submit and leave:')
-        print(f'mean l_sl: {np.mean(l_sl)}')
-        print(f'std l_sl: {np.std(l_sl)}')
+        # l_sl = mp_rollout(1000, 50, 'linear_sl_agent', env_type, 1.0, n_lots)
+        # print('linear submit and leave:')
+        # print(f'mean l_sl: {np.mean(l_sl)}')
+        # print(f'std l_sl: {np.std(l_sl)}')
 
         # data['E[sl]'] = np.mean(sl)
         # data['Std[sl]'] = np.std(sl)
@@ -73,12 +78,12 @@ for n_lots in [10, 40]:
         # print(data)
         # data.to_csv(f'rewards/{env_type}_{n_lots}.csv')
 
-        data = pd.DataFrame({'lsl': l_sl, 'sl': sl, 'rl': rewards})
-        print(data)
-        path = f'rewards/{env_type}_{n_lots}.csv'
-        print(f'saving to {path}')
-        # ordering will be reversed by seaborn. so that we have rl, sl, lsl 
-        data.to_csv(path)
+        # data = pd.DataFrame({'lsl': l_sl, 'sl': sl, 'rl': rewards})
+        # print(data)
+        # path = f'rewards/{env_type}_{n_lots}.csv'
+        # print(f'saving to {path}')
+        # # ordering will be reversed by seaborn. so that we have rl, sl, lsl 
+        # data.to_csv(path)
 
         # Shut down all Ray actors
         # ray.shutdown()
