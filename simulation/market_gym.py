@@ -264,7 +264,7 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
 
 if __name__ == '__main__':
 
-    test_rl_agent(num_episodes=20, seed=0, market_type='noise', volume=20)
+    # test_rl_agent(num_episodes=20, seed=0, market_type='noise', volume=20)
 
     start_time = time.time()
     rewards, times, n_events = rollout(seed=0, num_episodes=10, execution_agent='linear_sl_agent', market_type='noise', volume=10)

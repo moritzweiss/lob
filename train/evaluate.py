@@ -17,9 +17,9 @@ import ray
 ray.init()
 # print('finished')
 
-lots = [10]
+lots = [40]
 envs = ['noise', 'flow']
-n_cpus = 10
+n_cpus = 50
 
 for n_lots in lots:
     # for env_type in ['strategic', 'flow', 'noise']:
@@ -51,32 +51,32 @@ for n_lots in lots:
         # print(out['evaluation']['hist_stats']['episode_reward_mean'] )
         print(f'std: {np.std(rewards)}')
 
-        # data['E[rl]'] = np.mean(rewards)
-        # data['Std[rl]'] = np.std(rewards)
+        data['E[rl]'] = np.mean(rewards)
+        data['Std[rl]'] = np.std(rewards)
         
         # seeding ??
-        rewards, _, _ = mp_rollout(n_samples=1000, n_cpus=n_cpus, execution_agent='sl_agent', market_type=env_config['market_env'], volume=env_config['volume'])
+        sl, _, _ = mp_rollout(n_samples=1000, n_cpus=n_cpus, execution_agent='sl_agent', market_type=env_config['market_env'], volume=env_config['volume'])
         # sl = [x-1e-5 if x >=1 else x for x in sl]
         print('SL RESULTS')
-        print(f'mean sl: {np.mean(rewards)}')
-        print(f'std sl: {np.std(rewards)}')
+        print(f'mean sl: {np.mean(sl)}')
+        print(f'std sl: {np.std(sl)}')
 
 
-        # l_sl = mp_rollout(1000, 50, 'linear_sl_agent', env_type, 1.0, n_lots)
-        # print('linear submit and leave:')
-        # print(f'mean l_sl: {np.mean(l_sl)}')
-        # print(f'std l_sl: {np.std(l_sl)}')
+        l_sl, _, _ = mp_rollout(n_samples=1000, n_cpus=50, execution_agent='linear_sl_agent', market_type=env_type, volume=n_lots)
+        print('linear submit and leave:')
+        print(f'mean l_sl: {np.mean(l_sl)}')
+        print(f'std l_sl: {np.std(l_sl)}')
 
-        # data['E[sl]'] = np.mean(sl)
-        # data['Std[sl]'] = np.std(sl)
-        # data['E[l_sl]'] = np.mean(l_sl)
-        # data['Std[l_sl]'] = np.std(l_sl)
+        data['E[sl]'] = np.mean(sl)
+        data['Std[sl]'] = np.std(sl)
+        data['E[l_sl]'] = np.mean(l_sl)
+        data['Std[l_sl]'] = np.std(l_sl)
 
         # Create a dictionary from the data
 
-        # data = pd.DataFrame(data, index=[n_lots])
-        # print(data)
-        # data.to_csv(f'rewards/{env_type}_{n_lots}.csv')
+        data = pd.DataFrame(data, index=[n_lots]).round(2)
+        print(data)
+        data.to_csv(f'rewards/{env_type}_{n_lots}.csv')
 
         # data = pd.DataFrame({'lsl': l_sl, 'sl': sl, 'rl': rewards})
         # print(data)
