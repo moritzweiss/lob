@@ -15,6 +15,9 @@ from ray.rllib.utils import check_env
 # from simulation.all_markets_simulation import Market, config 
 # import sys
 from simulation.market_gym import Market
+# custom model stuff 
+from legacy_code.custom_model import CustomTorchModel, TorchDirichlet
+from ray.rllib.models import ModelCatalog
 
 volume = 40
 market_env = 'flow'
@@ -25,17 +28,20 @@ env_config = {'market_env': market_env, 'execution_agent': 'rl_agent',
 # M = Market(env_config)
 # check_env(M)
 
+##### this stuff is needed for custom models 
+ModelCatalog.register_custom_model("my_torch_model", CustomTorchModel)
+ModelCatalog.register_custom_action_dist("my_dist", TorchDirichlet)
 # not sure what 'test' is doing 
 # custom_config = copy.deepcopy(MODEL_DEFAULTS)
-# custom_config = {}
+custom_config = {}
 # custom_config['test'] = 1
-# custom_config['vf_share_layer'] = False
+custom_config['vf_share_layer'] = False
 # this is for model configurations 
-# model_config = { # By default, the MODEL_DEFAULTS dict above will be used.
-#         "custom_model": "my_torch_model",
-#          "custom_model_config": custom_config,
-#          "custom_action_dist": "my_dist"} 
-
+model_config = { # By default, the MODEL_DEFAULTS dict above will be used.
+        "custom_model": "my_torch_model",
+         "custom_model_config": custom_config,
+         "custom_action_dist": "my_dist"} 
+##### custom model stuff 
 
 model_config = {"vf_share_layers": False} 
 env_eval_config = env_config.copy()
