@@ -1,5 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
 import os
+
 import random
 import time
 from dataclasses import dataclass
@@ -24,10 +25,10 @@ from simulation.market_gym import Market
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 1
+    seed: int = 0
     """seed of the experiment"""
     torch_deterministic: bool = True
-    """if toggled, `torch.backends.cudnn.deterministic=False`"""
+    """if toggled, `torch.backends.cudnn.deterministic=False"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
     track: bool = False
@@ -38,7 +39,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    save_model: bool = False
+    save_model: bool = True
     """whether to save model into the `runs/{run_name}` folder"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
@@ -50,13 +51,13 @@ class Args:
     env_id: str = "Market"
     """the id of the environment"""
     # total_timesteps: int = 1000000
-    total_timesteps: int = 50*4*64
+    total_timesteps: int = 100*80*50
     """total timesteps of the experiments"""
-    learning_rate: float = 5e-4
+    learning_rate: float = 1e-2
     """the learning rate of the optimizer"""
-    num_envs: int = 4
+    num_envs: int = 80
     """the number of parallel game environments"""
-    num_steps: int = 64
+    num_steps: int = 50
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = False
     """Toggle learning rate annealing for policy and value networks"""
@@ -70,7 +71,7 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 0.5
+    clip_coef: float = 10
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
@@ -78,7 +79,8 @@ class Args:
     """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
-    max_grad_norm: float = 0.5
+    # max_grad_norm: float = 0.5
+    max_grad_norm: float = 100
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
@@ -92,24 +94,10 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma):
+def make_env(config):
     def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
-        env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        return env
-
+        return Market(config)
     return thunk
-
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -154,7 +142,8 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_large_batch_flow40"
     if args.track:
         import wandb
 
@@ -182,15 +171,9 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    config1 = {'market_env': 'flow', 'execution_agent': 'rl_agent', 'volume': 10, 'seed': 1}
-    # config2 = {'market_env': 'flow', 'execution_agent': 'rl_agent', 'volume': 10, 'seed': 2}
-    # env_fns = [lambda: Market(config1), lambda: Market(config2)]
-    configs = [{'market_env': 'flow', 'execution_agent': 'rl_agent', 'volume': 10, 'seed': s} for s in range(4)]
-    env_fns = [lambda: Market(config) for config in configs]
+    configs = [{'market_env': 'flow', 'execution_agent': 'rl_agent', 'volume': 40, 'seed': args.seed+s} for s in range(args.num_envs)]
+    env_fns = [make_env(config) for config in configs]
     envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
-    # envs = gym.vector.SyncVectorEnv(
-    #     [make_env(args.env_id, i, args.capture_video, run_name, args.gamma) for i in range(args.num_envs)]
-    # )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     agent = Agent(envs).to(device)
@@ -218,6 +201,7 @@ if __name__ == "__main__":
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
+            print(lrnow)
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
@@ -349,27 +333,28 @@ if __name__ == "__main__":
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
-        from cleanrl_utils.evals.ppo_eval import evaluate
 
-        episodic_returns = evaluate(
-            model_path,
-            make_env,
-            args.env_id,
-            eval_episodes=10,
-            run_name=f"{run_name}-eval",
-            Model=Agent,
-            device=device,
-            gamma=args.gamma,
-        )
-        for idx, episodic_return in enumerate(episodic_returns):
-            writer.add_scalar("eval/episodic_return", episodic_return, idx)
+        # from cleanrl.cleanrl_utils.evals.ppo_eval import evaluate
+        # episodic_returns = evaluate(
+        #     model_path,
+        #     make_env,
+        #     args.env_id,
+        #     eval_episodes=10,
+        #     run_name=f"{run_name}-eval",
+        #     Model=Agent,
+        #     device=device,
+        #     gamma=args.gamma,
+        # )
 
-        if args.upload_model:
-            from cleanrl_utils.huggingface import push_to_hub
+        # for idx, episodic_return in enumerate(episodic_returns):
+        #     writer.add_scalar("eval/episodic_return", episodic_return, idx)
 
-            repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-            repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "PPO", f"runs/{run_name}", f"videos/{run_name}-eval")
+        # if args.upload_model:
+        #     from cleanrl_utils.huggingface import push_to_hub
+
+        #     repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
+        #     repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
+        #     push_to_hub(args, episodic_returns, repo_id, "PPO", f"runs/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()
