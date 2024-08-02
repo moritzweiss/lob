@@ -21,7 +21,8 @@ from queue import PriorityQueue
 
 
 
-def average_shape(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, imbalance=False, imbalance_factor=3, shape_file=None):
+def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, 
+                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, totol_trades_window=1000):
     agents = {}
 
     # noise agent 
@@ -57,42 +58,42 @@ def average_shape(n_steps=1, rng=default_rng(0), initial_shape=50, damping_facto
         pq.put(out)
 
     # simulation
+    # not for n_steps = 100 the order book will record 99 events because the initial event and the first noise agent event happen at the same time at t=0     
     for _ in range(n_steps):
         time, prio, agent_id = pq.get()
         orders = agents[agent_id].generate_order(lob=LOB, time=time) 
-        order = orders[0]
-        if order.volume is None:
-            raise ValueError('Volume is None')        
+        # order = orders[0]
+        # if order.volume is None:
+        #     raise ValueError('Volume is None')        
         LOB.process_order_list(orders)
         out = agents[agent_id].new_event(time, agent_id)
         if out is not None:
             pq.put(out)
-    # 
+
+    # get bid and ask volumes but at a lower frequency. start from T/2 (by this time the order book should become more stable)
     T = len(LOB.data.bid_volumes)
-    bid_volumes = LOB.data.bid_volumes[-int(T/2):][::1000]
-    ask_volumes = LOB.data.ask_volumes[-int(T/2):][::1000]
-    # bid_volumes = LOB.data.bid_volumes
-    # ask_volumes = LOB.data.ask_volumes
-    # bestb = np.array(LOB.data.best_bid_prices[-int(T/2):][::100])
-    # besta = np.array(LOB.data.best_ask_prices[-int(T/2):][::100])
-    bestb = np.array(LOB.data.best_ask_prices[-int(T/2):][::1000]) 
-    besta = np.array(LOB.data.best_bid_prices[-int(T/2):][::1000])
+    bid_volumes = LOB.data.bid_volumes[-int(T/2):][::frequency]
+    ask_volumes = LOB.data.ask_volumes[-int(T/2):][::frequency]
+    bestb = np.array(LOB.data.best_ask_prices[-int(T/2):][::frequency]) 
+    besta = np.array(LOB.data.best_bid_prices[-int(T/2):][::frequency])
+    # bes bid and ask volumes 
     # bestbv = np.array(LOB.data.best_bid_volumes[-int(T/2):][::100])
     # bestav = np.array(LOB.data.best_ask_volumes[-int(T/2):][::100])
+    # mid proices 
     midp = (bestb + besta)/2
     midp_diff = np.diff(midp)
     midp = (np.array(LOB.data.best_ask_prices)+np.array(LOB.data.best_bid_prices))/2
-    # 
+    # totol trades over a sliding window of size totol_trades_window
     total_trades = np.array(LOB.data.market_buy[-int(T/2):])+np.array(LOB.data.market_sell[-int(T/2):])    
-    window = np.lib.stride_tricks.sliding_window_view(total_trades, window_shape=1000)
+    window = np.lib.stride_tricks.sliding_window_view(total_trades, window_shape=totol_trades_window)
     total_trades = np.sum(window, axis=-1)
     average_time_step = np.mean(np.diff(LOB.data.time_stamps[-int(T/2):]))
     return bid_volumes, ask_volumes, midp_diff, midp, window.sum(axis=-1), average_time_step
 
-def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance, imbalance_factor=3):
+def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance, frequency, total_trades_window, imbalance_factor=3):
     samples_per_cpu = int(n_samples/n_cpus)
     with Pool(n_cpus) as p:
-        out = p.starmap(average_shape, [(samples_per_cpu, default_rng(seed), initial_shape, damping_factor, imbalance, imbalance_factor) for seed in range(n_cpus)])    
+        out = p.starmap(get_statistics, [(samples_per_cpu, default_rng(seed), initial_shape, damping_factor, imbalance, imbalance_factor, None, frequency, total_trades_window) for seed in range(n_cpus)])    
     bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = zip(*out)
     bid_volumes = list(itertools.chain.from_iterable(bid_volumes))
     ask_volumes = list(itertools.chain.from_iterable(ask_volumes))
@@ -102,8 +103,8 @@ def mp_rollout(n_samples, n_cpus, initial_shape, damping_factor, imbalance, imba
     return bid_volumes, ask_volumes, midp_diff, trades, average_time_step
 
 def plot_prices(n_steps=int(1000), rng=default_rng(0), initial_shape=1, damping_factor=0.5, shape_file=None):
-    bidv, askv, midp_diff, midp, trades, average_time_step = average_shape(n_steps=int(n_steps), rng=rng, initial_shape=initial_shape, damping_factor=damping_factor, imbalance=False, shape_file=shape_file)
-    bidv_imb, askv_imb, midp_diff_imb, midp_imb, trades_imb, average_time_step_imb = average_shape(n_steps=int(n_steps), rng=rng, initial_shape=initial_shape, damping_factor=damping_factor, imbalance=True, shape_file=shape_file)
+    bidv, askv, midp_diff, midp, trades, average_time_step = get_statistics(n_steps=int(n_steps), rng=rng, initial_shape=initial_shape, damping_factor=damping_factor, imbalance=False, shape_file=shape_file)
+    bidv_imb, askv_imb, midp_diff_imb, midp_imb, trades_imb, average_time_step_imb = get_statistics(n_steps=int(n_steps), rng=rng, initial_shape=initial_shape, damping_factor=damping_factor, imbalance=True, shape_file=shape_file)
     plt.figure(figsize=(10, 6))
     plt.xlim(0, len(midp))
     plt.grid(True)
@@ -114,6 +115,8 @@ def plot_prices(n_steps=int(1000), rng=default_rng(0), initial_shape=1, damping_
     print('price plot is done')
 
 def trades_hist(trades, trades_imb):
+    # TODO what does KDE plots actually do ? 
+    # bar plot ? 
     plt.figure(figsize=(10, 6))
     sns.kdeplot(trades, fill=False, label=f'Noise')
     sns.kdeplot(trades_imb, fill=False, label=f'Noise+Flow,d={3}')
@@ -155,20 +158,23 @@ def plot_mid_price_changes(midp_diff, midp_diff_imb):
     
 
 if __name__ == '__main__':
-    # plot_prices(n_steps=int(1e5), rng=default_rng(4), initial_shape=5, damping_factor=0.2, shape_file='initial_shape/noise_unit.npz')
-    # average_shape(n_steps=4000, rng=default_rng(0), initial_shape=5, damping_factor=0.5, imbalance=False)
-    ####
-    N = int(1e6)
+    # compute average statistics 
+    # bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = get_statistics(n_steps=int(1e2), rng=default_rng(0), initial_shape=5, damping_factor=0.5, imbalance=False, frequency=10, totol_trades_window=10)
+    # compute average statistics using multiprocessing
     start_time = timeit.default_timer()
-    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=N, n_cpus=60, initial_shape=1, damping_factor=0, imbalance=False)
-    np.savez('initial_shape/noise.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=N, n_cpus=60, initial_shape=1, damping_factor=0.75, imbalance=True, imbalance_factor=2)
-    np.savez('initial_shape/noise_flow_75.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=int(1e6), n_cpus=80, initial_shape=1, damping_factor=0.85, imbalance=False, frequency=100, total_trades_window=100)
+    # np.savez('initial_shape/noise.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=int(1e6), n_cpus=60, initial_shape=1, damping_factor=0.75, imbalance=True, imbalance_factor=2, frequency=100, total_trades_window=100)
+    # np.savez('initial_shape/noise_flow_75.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
     end_time = timeit.default_timer()
+    print(f"Execution time: {end_time - start_time} seconds")
+    # plot one price trajectory 
+    # plot_prices(n_steps=int(1e5), rng=default_rng(4), initial_shape=5, damping_factor=0.8, shape_file='initial_shape/noise_unit.npz')
+    # average_shape(n_steps=4000, rng=default_rng(0), initial_shape=5, damping_factor=0.5, imbalance=False)
     # print(f"average time step noise = {np.mean(average_time_step)}")
     # print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
-    # print(f"Execution time: {end_time - start_time} seconds")
     # #####    
-    plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=30)
+    # plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=30)
+    # maybe bar plots make more sense here ?? 
     # trades_hist(trades, trades_imb)
-    # plot_mid_price_changes(midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
+    plot_mid_price_changes(midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
