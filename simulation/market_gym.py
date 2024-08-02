@@ -291,7 +291,7 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume):
     return total_rewards, times, n_events
 
 
-def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
+def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
     """
         - is slightly faster than a vectorized rollout 
         - this runs rollout for each cpu     
@@ -301,7 +301,7 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
     samples_per_env = int(n_samples/n_cpus) 
     with Pool(n_cpus) as p:
         # seed+1, in order to match worker_index
-        out = p.starmap(rollout, [(200+seed, samples_per_env, execution_agent, market_type, volume) for seed in range(n_cpus)])    
+        out = p.starmap(rollout, [(seed+s, samples_per_env, execution_agent, market_type, volume) for s in range(n_cpus)])    
     all_rewards, times, n_events  = zip(*out)
     all_rewards = list(itertools.chain.from_iterable(all_rewards))
     times = list(itertools.chain.from_iterable(times))
@@ -313,7 +313,7 @@ if __name__ == '__main__':
 
     n_samples = 1000
     n_cpus = 80
-    agent = 'rl_agent'
+    agent = 'linear_sl_agent'
     env = 'flow'
     lots = 40
     seed = 100
@@ -326,30 +326,16 @@ if __name__ == '__main__':
     # print(f'rewards: {rewards}')
     # print(f'times: {times}')
 
+    # rollout benchmark with multiprocessing 
     # start_time = time.time()
-    # rewards, times, n_events = mp_rollout(n_samples, n_cpus, agent, env, lots)
+    # rewards, times, n_events = mp_rollout(n_samples, n_cpus, agent, env, lots, seed)
     # end_time = time.time()
     # execution_time = end_time - start_time
     # print("Execution time:", execution_time)
     # # print(rewards)
     # print(f'mean rewards: {np.mean(rewards)}')
-    # print(fill_rates)
-
-
-    # # rollout rl policy 
-    # configs = [{'seed': seed+s, 'market_env': env, 'execution_agent': 'rl_agent', 'volume': lots} for s in range(n_cpus)]
-    # env_fns = [make_env(c) for c in configs]
-    # from rl_files.ppo_continuous_action import Agent
-    # model_path = "runs/Market__ppo_continuous_action__1__1722434240_large_batch_flow40/ppo_continuous_action.cleanrl_model"
-    # device = torch.device("cpu")
-    # start_time = time.time()
-    # total_rewards = rollout_vectorized_rl(n_episodes=n_samples, env_fns=env_fns, Model=Agent, model_path=model_path, device=device)
-    # end_time = time.time()
-    # execution_time = end_time - start_time
-    # print("Execution time:", execution_time)
-    # print(f'mean rewards: {np.mean(total_rewards)}')
-
-
+    # print(f'length of rewards: {len(rewards)}')
+    
     # start_time = time.time()
     # # this is only about 1 second slower than mp rollout for 100 samples and 80 cpus
     # total_rewards, times, n_events = rollout_vectorized_benchmarks(seed=0, n_episodes=n_samples, execution_agent='linear_sl_agent',  n_envs=n_cpus, market_type=env, volume=lots)
@@ -358,6 +344,22 @@ if __name__ == '__main__':
     # print("Execution time:", execution_time)
     # # print(total_rewards)
     # print(f'mean rewards: {np.mean(total_rewards)}')
+
+    # rollout rl policy 
+    # agent = 'rl_agent'
+    # configs = [{'seed': seed+s, 'market_env': env, 'execution_agent': 'rl_agent', 'volume': lots} for s in range(n_cpus)]
+    # env_fns = [make_env(c) for c in configs]
+    # from rl_files.ppo_continuous_action import Agent
+    # # model_path = "runs/Market__ppo_continuous_action__1__1722434240_large_batch_flow40/ppo_continuous_action.cleanrl_model"
+    # model_path = 'runs/Market__ppo_continuous_action__0__1722609875_large_batch_flow40/ppo_continuous_action.cleanrl_model'
+    # device = torch.device("cpu")
+    # start_time = time.time()
+    # total_rewards = rollout_vectorized_rl(n_episodes=n_samples, env_fns=env_fns, Model=Agent, model_path=model_path, device=device)
+    # end_time = time.time()
+    # execution_time = end_time - start_time
+    # print("Execution time:", execution_time)
+    # print(f'mean rewards: {np.mean(total_rewards)}')
+    # print(f'rewards length: {len(total_rewards)}')
 
 
     # envs = ['noise', 'flow', 'strategic']
