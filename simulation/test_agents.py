@@ -259,14 +259,14 @@ def test_linear_sl_agent_with_pq_all_fills(fills=False):
 
 
 
-
-test_market_order()
-test_limit_order()
-test_limit_order(terminated=False)
-sell_remaining()
-test_cancellation()
-test_dynamic()
-test_linear_sl_agent()
-test_linear_sl_agent_no_fills()
-test_linear_sl_agent_with_pq_all_fills()
+if __name__ == '__main__':
+    test_market_order()
+    test_limit_order()
+    test_limit_order(terminated=False)
+    sell_remaining()
+    test_cancellation()
+    test_dynamic()
+    test_linear_sl_agent()
+    test_linear_sl_agent_no_fills()
+    test_linear_sl_agent_with_pq_all_fills()
 
