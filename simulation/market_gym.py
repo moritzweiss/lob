@@ -24,9 +24,9 @@ class Market(gym.Env):
     def __init__(self, config):
 
         """
-        - config should have keys market_env, execution_agent, volume, seed
-        - we use a config, becuase this is required by rl lib 
-        - seed will be set depending on whether we use multiple workers or not 
+            - config should have keys market_env, execution_agent, volume, seed
+            - we use a config, becuase this is required by rl lib 
+            - seed will be set depending on whether we use multiple workers or not 
         """
 
         assert 'market_env' in config
@@ -108,7 +108,7 @@ class Market(gym.Env):
 
         # observation agent if rl agent is present: this will interupt the kernel at some time interval 
         if config['execution_agent'] == 'rl_agent':
-            self.observation_space = gym.spaces.Box(low=0, high=1, shape=(agent.observation_space_length,), dtype=np.float32)
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(agent.observation_space_length,), dtype=np.float32)
             self.action_space = gym.spaces.Box(low=-10, high=10, shape=(agent.action_space_length,), dtype=np.float32)    
             agent = ObservationAgent(**observation_agent_config)
             self.agents[agent.agent_id] = agent
@@ -135,7 +135,7 @@ class Market(gym.Env):
             out = self.agents[agent_id].initial_event()
             self.pq.put(out)
         # runs up to first obsercation or stops if the simulation is terminated 
-        # if there is no RL agent present: transition will just run straight to the end without any intermediate action
+        # if there is no RL agent present and no observation agent present, transition will just run straight to the end without any intermediate action
         observation, reward, terminated, info = self.transition()
         # this will terminate if the execution agent is one of the benchmark agents 
         return observation, info
@@ -152,20 +152,27 @@ class Market(gym.Env):
         # n_events = 0  
         while not self.pq.empty(): 
             # get next event from the event queue 
-            time, _, agent_id = self.pq.get()
+            time, priority, agent_id = self.pq.get()
             if time > self.agents[self.execution_agent_id].terminal_time:
                 # simulation should terminate at the execution agents terminal time
                 raise ValueError("time is greater than execution agents terminal time")
             if agent_id == 'rl_agent':
                 # if rl agent is present, generate an order based on action 
                 orders = self.agents[agent_id].generate_order(lob=self.lob, time=time, action=action)
+                # orders could be None if agent doesnt change the current orders, but just leaves them in place 
             else:
+                # observation agent also doesnt return any orders 
                 # for the benchmark agents, no action is needed 
                 orders = self.agents[agent_id].generate_order(lob=self.lob, time=time)
+                # assert orders is not None
             # update order book, and check whether execution agent orders have been filled 
-            # orders can be None if the agent has no more events in the pipeline. in this case generate_order() returns None 
-            if orders is not None:
+            # when can orders be None? 
+            # rl agent doesnt change anything. just leaves orders where they are. any other reason should not occur !
+            # rl agents returns empty list if it doesnt change anything
+            if orders is not None or orders == []:
                 msgs = self.lob.process_order_list(orders)
+                # only update execution agent position 
+                # noise agent and strategic agent do not update their positions
                 reward, terminated = self.agents[self.execution_agent_id].update_position_from_message_list(msgs)
                 transition_reward += reward
                 if terminated:
@@ -182,6 +189,8 @@ class Market(gym.Env):
         # if self.pq.empty() or terminated:
         if terminated:
             assert self.agents[self.execution_agent_id].volume == 0
+        # TODO: only record final info to increase speed 
+        # TODO: plain vanilla policy gradient without value function estimation
         info = {'cum_reward': self.agents[self.execution_agent_id].cummulative_reward, 
                 'passive_fill_rate': self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume,                
                 'time': time,
@@ -192,12 +201,17 @@ class Market(gym.Env):
                 }
         if self.execution_agent_id == 'rl_agent':
             observation = self.agents[self.execution_agent_id].get_observation(time, self.lob)
+            # print('------')
+            # print(f'time={observation[0]}')
+            # print(f'inventory={observation[1]}')
+            # print(f'midprice={observation[2]}')
+            # print(f'spread={observation[3]}')
+            # print(f'imbalance={observation[4]}')
         else:
             # benchmark agents should return None as observation 
             # assert observation is None
-            observation = np.array([None], dtype=np.float32)
+            observation = np.array([None], dtype=np.float32)            
         return observation, transition_reward, terminated, info 
-
 
 def make_env(config):
     def thunk():
@@ -235,7 +249,6 @@ def rollout_vectorized_rl(n_episodes, env_fns,
                     rewards.append(info['cum_reward'])
     return rewards
 
-
 def rollout_vectorized_benchmarks(seed, n_episodes, n_envs, execution_agent, market_type, volume): 
     """
         - uses vectorized environment to roll out benchmark rewards 
@@ -260,8 +273,6 @@ def rollout_vectorized_benchmarks(seed, n_episodes, n_envs, execution_agent, mar
         n_events.append(list(info['n_events']))
     return total_rewards, times, n_events
 
-
-
 def rollout(seed, n_episodes, execution_agent, market_type, volume):
     """
         - rolls out the environment for n_episodes
@@ -275,21 +286,28 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume):
     times = []
     n_events = []
     for _ in range(n_episodes):
+        # print('episode')
         # this runs through the end for the benchmark agents 
         observation, info = M.reset()
         if execution_agent == 'rl_agent':
+            print('NEW EPISODE')
+            print(observation)
             terminated = False
             while not terminated:
-                action = np.array([-10, -10, 10, -10, -10], dtype=np.float32)
+                # action = np.array([-10, 10, -10, -10, -10], dtype=np.float32)
+                action = np.array([-10, -10, -10, 10], dtype=np.float32)
+                # action = np.array([-10, -10, -10, -10, 10], dtype=np.float32)
+                # action = np.random.dirichlet(np.ones(M.action_space.shape[0]))
+                # action = np.array([0, 1, 0, 0, 0], dtype=np.float32)
                 assert action in M.action_space
                 observation, reward, terminated, truncated, info = M.step(action)
                 assert observation in M.observation_space
+                print(observation)
         # print(info)
         total_rewards.append(info['cum_reward'])
         times.append(info['time'])
-        n_events.append(info['n_events'])
+        n_events.append(info['n_events'])        
     return total_rewards, times, n_events
-
 
 def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
     """
@@ -308,33 +326,38 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
     n_events = list(itertools.chain.from_iterable(n_events))
     return all_rewards, times, n_events
 
-
 if __name__ == '__main__':
 
-    n_samples = 1000
-    n_cpus = 80
-    agent = 'linear_sl_agent'
+    n_samples = 7000        
+    # n_samples = 10
+    n_cpus = 50
+    # n_cpus = 
+    # agent = 'linear_sl_agent'
+    agent = 'sl_agent'
+    # agent = 'rl_agent'
     env = 'flow'
     lots = 40
     seed = 100
 
+    # rollout 
     # start_time = time.time()
-    # rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent='linear_sl_agent', market_type='flow', volume=40)
-    # end_tine = time.time()
-    # execution_time = end_tine - start_time
+    # rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent=agent, market_type=env, volume=lots)
+    # end_time = time.time()
+    # execution_time = end_time - start_time
     # print("Execution time:", execution_time)
     # print(f'rewards: {rewards}')
     # print(f'times: {times}')
 
     # rollout benchmark with multiprocessing 
-    # start_time = time.time()
-    # rewards, times, n_events = mp_rollout(n_samples, n_cpus, agent, env, lots, seed)
-    # end_time = time.time()
-    # execution_time = end_time - start_time
-    # print("Execution time:", execution_time)
-    # # print(rewards)
-    # print(f'mean rewards: {np.mean(rewards)}')
-    # print(f'length of rewards: {len(rewards)}')
+    start_time = time.time()
+    rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed)
+    np.savez(f'raw_rewards/rewards_{env}_{lots}_{agent}.npz', rewards=rewards)
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print("Execution time:", execution_time)
+    # print(rewards)
+    print(f'mean rewards: {np.mean(rewards)}')
+    print(f'length of rewards: {len(rewards)}')
     
     # start_time = time.time()
     # # this is only about 1 second slower than mp rollout for 100 samples and 80 cpus
@@ -349,9 +372,17 @@ if __name__ == '__main__':
     # agent = 'rl_agent'
     # configs = [{'seed': seed+s, 'market_env': env, 'execution_agent': 'rl_agent', 'volume': lots} for s in range(n_cpus)]
     # env_fns = [make_env(c) for c in configs]
+    # from rl_files.ppo_continuous_action import AgentDirichlet
     # from rl_files.ppo_continuous_action import Agent
-    # # model_path = "runs/Market__ppo_continuous_action__1__1722434240_large_batch_flow40/ppo_continuous_action.cleanrl_model"
+    # model_path = "runs/Market__ppo_continuous_action__1__1722434240_large_batch_flow40/ppo_continuous_action.cleanrl_model"
     # model_path = 'runs/Market__ppo_continuous_action__0__1722609875_large_batch_flow40/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1723555061_dirichlet_latest/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1723557188_dirichlet_10lots_flow/ppo_continuous_action.cleanrl_model'    
+    # model_path = 'runs/Market__ppo_continuous_action__0__1723558316_gauss_10lots_flow/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1723560320_dirichlet_40lots_noise/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1723561835_dirichlet_10lots_noise/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1723645145_dirichlet_10lots_noise/ppo_continuous_action.cleanrl_model'
+    # model_path = '40flow/Market__ppo_continuous_action__0__1723709472_gauss_40lots_with_features/ppo_continuous_action.cleanrl_model'
     # device = torch.device("cpu")
     # start_time = time.time()
     # total_rewards = rollout_vectorized_rl(n_episodes=n_samples, env_fns=env_fns, Model=Agent, model_path=model_path, device=device)
