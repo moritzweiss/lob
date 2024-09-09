@@ -3,7 +3,7 @@ import os
 
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclawss
 
 import gymnasium as gym
 import numpy as np
@@ -12,6 +12,8 @@ import torch.nn as nn
 import torch.optim as optim
 import tyro
 from torch.distributions.normal import Normal
+from torch.distributions.dirichlet import Dirichlet
+
 from torch.utils.tensorboard import SummaryWriter
 
 import sys 
@@ -51,15 +53,15 @@ class Args:
     env_id: str = "Market"
     """the id of the environment"""
     # total_timesteps: int = 1000000
-    total_timesteps: int = 100*80*50
+    total_timesteps: int = 2*30
     """total timesteps of the experiments"""
     learning_rate: float = 1e-2
     """the learning rate of the optimizer"""
-    num_envs: int = 80
+    num_envs: int = 2
     """the number of parallel game environments"""
-    num_steps: int = 50
+    num_steps: int = 30
     """the number of steps to run in each environment per policy rollout"""
-    anneal_lr: bool = False
+    anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 1.0
     """the discount factor gamma"""
@@ -71,7 +73,7 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 10
+    clip_coef: float = 10.0
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
@@ -99,6 +101,77 @@ def make_env(config):
         return Market(config)
     return thunk
 
+
+def new_layer_init(layer):
+    # note: this initialization worked worse than the default pytorch initialization
+    # torch.nn.init.orthogonal_(layer.weight, std)
+    # torch.nn.init.constant_(layer.bias, bias_const)
+    # torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, 0.0)
+    torch.nn.init.constant_(layer.weight, 0.0)
+    return layer
+
+class ActorNetwork(nn.Module):
+    def __init__(self, observation_size, action_size):
+        super().__init__()
+        self.l1 = nn.Linear(observation_size, 64)
+        self.l2 = nn.Linear(64, 64)
+        self.l3 = nn.Linear(64, action_size)
+        self.tanh = nn.Tanh()
+        self.sofplus = nn.Softplus()
+        # self.actor_mean = nn.Sequential(
+        #     layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+        #     nn.Tanh(),
+        #     layer_init(nn.Linear(64, 64)),
+        #     nn.Tanh(),
+        #     layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
+        # )
+        # changed to reqires_grad=False
+        # setting requires_grad=True yields better results: HOW IS THIS UPDATED ? 
+        # i guess the parameters are not state dependent, but are updated as we go along
+        # this must be the case otherwise entropy would not decreae gradually
+        self.actor_logstd = nn.Parameter(torch.zeros(1, action_size), requires_grad=True)
+
+    def forward(self, x):
+        l1 = self.l1(x)
+        l1 = self.tanh(l1)
+        l2 = self.l2(l1)
+        l2 = self.tanh(l2)
+        l3 = self.l3(l2)
+        concentrations = 1+self.sofplus(l3)
+        return concentrations
+
+
+# TODO implement an agent using Dirichlet policy 
+class AgentDirichlet(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 1), std=1.0),
+        )
+        self.actor_network = ActorNetwork(np.array(envs.single_observation_space.shape).prod(), np.prod(envs.single_action_space.shape))
+        # self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)), requires_grad=True)
+
+    def get_value(self, x):
+        return self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        concentrations = self.actor_network(x)
+        # action_logstd = self.actor_logstd.expand_as(action_mean)
+        # not sure how action_std is updated by the optimizer 
+        # action_std = torch.exp(action_logstd)
+        probs = Dirichlet(concentrations)
+        self.concentrations_params = concentrations
+        if action is None:
+            action = probs.sample()
+        # entropy is summed for each component of the action
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+ 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -122,7 +195,11 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+        # changed to reqires_grad=False
+        # setting requires_grad=True yields better results: HOW IS THIS UPDATED ? 
+        # i guess the parameters are not state dependent, but are updated as we go along
+        # this must be the case otherwise entropy would not decreae gradually
+        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)), requires_grad=True)
 
     def get_value(self, x):
         return self.critic(x)
@@ -130,20 +207,26 @@ class Agent(nn.Module):
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
+        # not sure how action_std is updated by the optimizer 
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
+        # entropy is summed for each component of the action
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
 if __name__ == "__main__":
+    ###
+    volume = 40
+    market_env = 'flow'
+    ###
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_large_batch_flow40"
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_{market_env}_{volume}"
     if args.track:
         import wandb
 
@@ -171,12 +254,15 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    configs = [{'market_env': 'flow', 'execution_agent': 'rl_agent', 'volume': 40, 'seed': args.seed+s} for s in range(args.num_envs)]
+    configs = [{'market_env': market_env, 'execution_agent': 'rl_agent', 'volume': volume, 'seed': args.seed+s} for s in range(args.num_envs)]
     env_fns = [make_env(config) for config in configs]
     envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     agent = Agent(envs).to(device)
+    # print(agent)
+    # agent = AgentDirichlet(envs).to(device)
+    # print(agent)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -187,7 +273,7 @@ if __name__ == "__main__":
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
-    # TRY NOT TO MODIFY: start the game
+    # TRY NOT TO MODIFY: start the game´
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
@@ -302,6 +388,10 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
+                # not sure if it makes sense to take the mean here 
+                # entropy should always be the same for each worker (or compment of the batch) (idx, action1, action2, action3)
+                # entropy only depends on the current standard deviation 
+                # instead of mean, could just take the first component of the entropy tensor
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
@@ -312,6 +402,9 @@ if __name__ == "__main__":
 
             if args.target_kl is not None and approx_kl > args.target_kl:
                 break
+        
+        # print('concentrations')
+        # print(agent.concentrations_params)
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
