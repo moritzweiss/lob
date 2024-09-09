@@ -126,20 +126,20 @@ def trades_hist(trades, trades_imb):
     plt.tight_layout()
     plt.savefig('plots/trades_histogram.pdf', dpi=350)
 
-def plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=10):
+def plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=10):
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv, askv, level=level, file_name=f'noise', title='noise', ax=axs)
     fig.tight_layout()
-    fig.savefig('plots/average_shape_noise.pdf', dpi=350)
+    fig.savefig(f'plots/average_shape_noise_{name}.pdf', dpi=350)
     # 
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv_imb, askv_imb, level=10, file_name=f'noise_flow', title=f'noise+flow', ax=axs)        
     fig.tight_layout()
-    fig.savefig('plots/average_shape_flow.pdf', dpi=350)
+    fig.savefig(f'plots/average_shape_flow_{name}.pdf', dpi=350)
     # 
     print('saved average shape plots')
 
-def plot_mid_price_changes(midp_diff, midp_diff_imb):
+def plot_mid_price_changes(name, midp_diff, midp_diff_imb):
     plt.figure(figsize=(10, 6))
     # print(midp_diff_imb)
     sns.kdeplot(midp_diff, fill=False, label='Noise')
@@ -154,7 +154,7 @@ def plot_mid_price_changes(midp_diff, midp_diff_imb):
     plt.legend()
     plt.tight_layout()
     plt.xlim(-10, 10)
-    plt.savefig('plots/midpn_changes_histogram.pdf', dpi=350)
+    plt.savefig(f'plots/midpn_changes_histogram_{name}.pdf', dpi=350)
     
 
 if __name__ == '__main__':
@@ -174,7 +174,8 @@ if __name__ == '__main__':
     # print(f"average time step noise = {np.mean(average_time_step)}")
     # print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
     # #####    
-    # plot_average_shape(bidv, askv, bidv_imb, askv_imb, level=30)
+    name = 'std2'
+    plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=30)
     # maybe bar plots make more sense here ?? 
     # trades_hist(trades, trades_imb)
-    plot_mid_price_changes(midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
+    plot_mid_price_changes(name=name, midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
