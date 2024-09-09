@@ -1,3 +1,5 @@
+# legacy code 
+
 from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, InitialAgent
 from limit_order_book.limit_order_book import LimitOrderBook
 from config.config import noise_agent_config, strategic_agent_config, sl_agent_config, linear_sl_agent_config, market_agent_config, initial_agent_config
