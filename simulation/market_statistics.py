@@ -1,3 +1,4 @@
+
 from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, RLAgent, InitialAgent
 from limit_order_book.limit_order_book import LimitOrderBook
 from config.config import noise_agent_config, strategic_agent_config, sl_agent_config, linear_sl_agent_config, market_agent_config, initial_agent_config
@@ -11,7 +12,22 @@ from multiprocessing import Pool
 import itertools
 import time
 import seaborn as sns
+import sys
 import matplotlib.pyplot as plt
+import os 
+# current = os.path.dirname(os.path.realpath(__file__))
+# parent = os.path.dirname(current)
+# sys.path.append(parent)
+
+"""
+    - this code is desgigned to obtain market statistic: like mid price drift, number of trades, number of events
+    - the statistics are averaged over episodes 
+    - the prioity queue is set up manually (no universal class for this, just do case by case)
+    - save plots in the plots folder and trades in the results folder
+    - TODO: could write the code using the Market environment class: need to modify the Market class 
+        - currently, the market class always requires an execution agent
+        - would need to have the case with and without execution agent
+"""
 
 
 class Market():
@@ -57,7 +73,6 @@ class Market():
             self.agents[agent.agent_id] = agent 
         
     
-
     def reset(self):
         list_of_agents = list(self.agents.keys()) 
         self.lob = LimitOrderBook(list_of_agents=list_of_agents, level=30, only_volumes=False)
@@ -92,7 +107,11 @@ class Market():
 
         trades = np.sum(self.lob.data.market_buy)+np.sum(self.lob.data.market_sell)
 
-        return time, n_events, drift, trades   
+        buy_orders = np.sum(self.lob.data.market_buy)
+
+        sell_orders = np.sum(self.lob.data.market_sell)
+
+        return time, n_events, drift, trades, buy_orders, sell_orders
 
 
 def rollout(seed, num_episodes, market_type):
@@ -101,84 +120,101 @@ def rollout(seed, num_episodes, market_type):
     drifts = []
     times = []
     trades = []
+    buy_orders = []
+    sell_orders = []
     for _ in range(num_episodes):
         M.reset()
-        time, n_event, drift, trade = M.run()
+        time, n_event, drift, trade, buys, sells = M.run()
         n_events.append(n_event)
         drifts.append(drift)
         times.append(time)
         trades.append(trade)
-    return n_events, drifts, times, trades
+        buy_orders.append(buys)
+        sell_orders.append(sells)
+    return n_events, drifts, times, trades, buy_orders, sell_orders
 
 
 def mp_rollout(n_samples, n_cpus, market_type):
+    """
+        - TODO: do this with joblib
+    """
     samples_per_env = int(n_samples/n_cpus) 
     with Pool(n_cpus) as p:
         out = p.starmap(rollout, [(seed, samples_per_env, market_type) for seed in range(n_cpus)])    
-    n_events, drifts, times, trades  = zip(*out)
+    n_events, drifts, times, trades, buys, sells  = zip(*out)
     n_events = list(itertools.chain.from_iterable(n_events))
     times = list(itertools.chain.from_iterable(times))
     drifts = list(itertools.chain.from_iterable(drifts))
     trades = list(itertools.chain.from_iterable(trades))
-    return n_events, drifts, times, trades  
+    buys = list(itertools.chain.from_iterable(buys))
+    sells = list(itertools.chain.from_iterable(sells))
+    return n_events, drifts, times, trades, buys, sells 
 
-# out = rollout(seed=0, num_episodes=10, market_type='strategic')
-# print(out)
 
-# out = mp_rollout(100, 10, 'flow')
-# print(out)
 
 
 if __name__ == '__main__':
-    envs = ['noise', 'flow', 'strategic']
-    n_samples = 1000
-    n_cpus = 50
-    results = {}
-    results[f'n_events'] = []
-    results[f'drift_mean'] = []
-    results[f'drift_std'] = []
-    results[f'trades'] = []
-    data_for_plot = {}
+    ## test 
+    out = rollout(seed=0, num_episodes=10, market_type='noise')
+    print(out)
+    # out = mp_rollout(n_samples=100, n_cpus=10, market_type='flow')
+    # print(out)
+    # 
+    # envs = ['noise', 'flow', 'strategic']
+    envs = ['noise', 'flow']
+    # n_samples = 1000
+    n_samples = 5000
+    # n_cpus = 80
+    n_cpus = 80
+    results = {f'n_events': [],'drift_mean': [], 'drift_std': [], 'trades': [], 'trades_std': [], 'buy_orders': [], 'sell_orders': []} 
+    data_drifts = {}
     data_for_trade_plot = {}
+    start_time = time.time()
     for env in envs:
-        n_events, drifts, times, trades = mp_rollout(n_samples, n_cpus, env)
-        data_for_plot[env] = drifts
+        n_events, drifts, times, trades, buys, sells = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, market_type=env)
+        data_drifts[env] = drifts
         data_for_trade_plot[env] = trades
         results[f'n_events'].append(np.mean(n_events))
         results[f'drift_mean'].append(np.mean(drifts))
         results[f'drift_std'].append(np.std(drifts))
         results[f'trades'].append(np.mean(trades))
+        results[f'trades_std'].append(np.std(trades))
+        results[f'buy_orders'].append(np.mean(buys))
+        results[f'sell_orders'].append(np.mean(sells))
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print("Execution time:", execution_time, "seconds")
+
+    # process results 
     results = pd.DataFrame.from_dict(results).round(2)
     results.index = envs 
     print(results)
-    # results.to_csv(f'results/benchmarks_{lots}.csv')
-    # Plot histogram of drifts for noise and flow
-    plt.figure(figsize=(10, 6))
-    plt.tight_layout()
-    sns.kdeplot(data_for_plot['noise'], fill=False, label='Noise', bw_adjust=12)
-    sns.kdeplot(data_for_plot['flow'], fill=False, label='Flow', bw_adjust=12)
-    sns.kdeplot(data_for_plot['strategic'], fill=False, label='Strategic', bw_adjust=12)
+    results.to_csv(f'results/market_stats.csv')
+
+    # histogram of drifts 
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = ['blue', 'green']
+    bins = np.arange(-4.25, 5.75, 0.5)
+    ax.hist([data_drifts['noise'], data_drifts['flow']], bins, density=False, histtype='bar', color=colors, label=['Noise', 'Flow'], rwidth=0.8)
+    ax.set_xticks(np.arange(-4, 4.5, 0.5))
+    ax.tick_params(axis='x', labelsize=7)
+    ax.legend(prop={'size': 10})
+    ax.set_title('Mid Price Drift', fontsize=12)
     plt.grid(True)
-    plt.xlabel('mid price drift', fontsize=16)
-    plt.xlim(-15, 15)
-    plt.xticks(np.arange(-15, 16, 5))
-    plt.legend(fontsize=12)
-    plt.savefig('plots/mid_price_drift_density.pdf')
-    # Plot histogram of trades for each market type
+    plt.xlim(-4, 4)
+    # plt.tight_layout()
+    plt.savefig('plots/mid_price_drift_std2.pdf')
     plt.figure(figsize=(10, 6))
-    # sns.histplot(data_for_trade_plot['noise'], bins=20, color='blue', kde=False, label='Noise', alpha=0.5)
-    # sns.histplot(data_for_trade_plot['flow'], bins=20, color='orange', kde=False, label='Flow', alpha=0.5)
-    # sns.histplot(data_for_trade_plot['strategic'], bins=20, color='green', kde=False, label='Strategic', alpha=0.5)
-    sns.kdeplot(data_for_trade_plot['noise'], fill=False, label='Noise', bw_adjust=3, clip=(0, 150))
-    sns.kdeplot(data_for_trade_plot['flow'], fill=False, label='Flow', bw_adjust=3, clip=(0, 150))
-    sns.kdeplot(data_for_trade_plot['strategic'], fill=False, label='Strategic', bw_adjust=3, clip=(0, 150))
+
+
+    # plot histogram of trades for each market type
+    plt.figure(figsize=(10, 6))
+    sns.kdeplot(data_for_trade_plot['noise'], fill=False, label='Noise', clip=(0, 150))
+    sns.kdeplot(data_for_trade_plot['flow'], fill=False, label='Flow',  clip=(0, 150))
     plt.legend(fontsize=12)
-    plt.xlim(0, 150)
+    plt.xlim(0, 140)
     plt.grid(True)
-    plt.xlabel('Number of Trades', fontsize=16)
+    plt.title('Number of Trades', fontsize=16)
     plt.ylabel('Frequency')
-    plt.tight_layout()
-    plt.savefig('plots/histogram_trades.pdf')
-
-
-
+    # plt.tight_layout()
+    plt.savefig('plots/kde_trades_std2.pdf')
