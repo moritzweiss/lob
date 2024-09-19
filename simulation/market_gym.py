@@ -152,18 +152,18 @@ class Market(gym.Env):
         # n_events = 0  
         while not self.pq.empty(): 
             # get next event from the event queue 
-            time, priority, agent_id = self.pq.get()
-            if time > self.agents[self.execution_agent_id].terminal_time:
+            t, priority, agent_id = self.pq.get()
+            if t > self.agents[self.execution_agent_id].terminal_time:
                 # simulation should terminate at the execution agents terminal time
                 raise ValueError("time is greater than execution agents terminal time")
             if agent_id == 'rl_agent':
                 # if rl agent is present, generate an order based on action 
-                orders = self.agents[agent_id].generate_order(lob=self.lob, time=time, action=action)
+                orders = self.agents[agent_id].generate_order(lob=self.lob, time=t, action=action)
                 # orders could be None if agent doesnt change the current orders, but just leaves them in place 
             else:
                 # observation agent also doesnt return any orders 
                 # for the benchmark agents, no action is needed 
-                orders = self.agents[agent_id].generate_order(lob=self.lob, time=time)
+                orders = self.agents[agent_id].generate_order(lob=self.lob, time=t)
                 # assert orders is not None
             # update order book, and check whether execution agent orders have been filled 
             # when can orders be None? 
@@ -179,7 +179,7 @@ class Market(gym.Env):
                     break
             # if not terminated or execution agent not present, generate a new event 
             # can be None if there are no more events happening for the agent 
-            out = self.agents[agent_id].new_event(time, agent_id)
+            out = self.agents[agent_id].new_event(t, agent_id)
             if out is not None:
                 self.pq.put(out)
             # observation agent breaks the loop 
@@ -194,13 +194,13 @@ class Market(gym.Env):
         initial_mid_price = (self.agents['initial_agent'].initial_ask + self.agents['initial_agent'].initial_bid)/2
         info = {'cum_reward': self.agents[self.execution_agent_id].cummulative_reward, 
                 'passive_fill_rate': self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume,                
-                'time': time,
+                'time': t,
                 'drift': mid_price - initial_mid_price,
                 'n_events': self.agents['noise_agent'].n_events,
                 'terminated': terminated, 
                 }
         if self.execution_agent_id == 'rl_agent':
-            observation = self.agents[self.execution_agent_id].get_observation(time, self.lob)
+            observation = self.agents[self.execution_agent_id].get_observation(t, self.lob)
             # print('------')
             # print(f'time={observation[0]}')
             # print(f'inventory={observation[1]}')
@@ -344,7 +344,7 @@ if __name__ == '__main__':
 
     # rollout 
     start_time = time.time()
-    rewards, times, n_events = rollout(seed=0, n_episodes=1, execution_agent=agent, market_type=env, volume=lots)
+    rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent=agent, market_type=env, volume=lots)
     end_time = time.time()
     execution_time = end_time - start_time
     print("Execution time:", execution_time)
