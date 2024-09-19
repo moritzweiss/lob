@@ -190,14 +190,14 @@ class Market(gym.Env):
         if terminated:
             assert self.agents[self.execution_agent_id].volume == 0
         # TODO: only record final info to increase speed 
-        # TODO: plain vanilla policy gradient without value function estimation
+        mid_price = (self.lob.data.best_bid_prices[-1] + self.lob.data.best_ask_prices[-1])/2
+        initial_mid_price = (self.agents['initial_agent'].initial_ask + self.agents['initial_agent'].initial_bid)/2
         info = {'cum_reward': self.agents[self.execution_agent_id].cummulative_reward, 
                 'passive_fill_rate': self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume,                
                 'time': time,
-                # 'drift': (self.lob.data.best_bid_prices[-1] + self.lob.data.best_ask_prices[-1])/2 - self.reference_mid_price,
+                'drift': mid_price - initial_mid_price,
                 'n_events': self.agents['noise_agent'].n_events,
-                'terminated': terminated
-                # 'terminated': terminated
+                'terminated': terminated, 
                 }
         if self.execution_agent_id == 'rl_agent':
             observation = self.agents[self.execution_agent_id].get_observation(time, self.lob)
@@ -295,13 +295,16 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume):
             terminated = False
             while not terminated:
                 # action = np.array([-10, 10, -10, -10, -10], dtype=np.float32)
-                action = np.array([-10, -10, -10, 10], dtype=np.float32)
+                action = np.array([-10, -10, 10, -10], dtype=np.float32)
                 # action = np.array([-10, -10, -10, -10, 10], dtype=np.float32)
                 # action = np.random.dirichlet(np.ones(M.action_space.shape[0]))
                 # action = np.array([0, 1, 0, 0, 0], dtype=np.float32)
                 assert action in M.action_space
                 observation, reward, terminated, truncated, info = M.step(action)
-                assert observation in M.observation_space
+                print(observation.shape)
+                # assert observation in M.observation_space
+                # print(f'queues: {observation[1]}')
+                print('observation')
                 print(observation)
         # print(info)
         total_rewards.append(info['cum_reward'])
@@ -333,31 +336,31 @@ if __name__ == '__main__':
     n_cpus = 50
     # n_cpus = 
     # agent = 'linear_sl_agent'
-    agent = 'sl_agent'
+    agent = 'rl_agent'
     # agent = 'rl_agent'
-    env = 'flow'
+    env = 'noise'
     lots = 40
     seed = 100
 
     # rollout 
-    # start_time = time.time()
-    # rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent=agent, market_type=env, volume=lots)
-    # end_time = time.time()
-    # execution_time = end_time - start_time
-    # print("Execution time:", execution_time)
-    # print(f'rewards: {rewards}')
-    # print(f'times: {times}')
-
-    # rollout benchmark with multiprocessing 
     start_time = time.time()
-    rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed)
-    np.savez(f'raw_rewards/rewards_{env}_{lots}_{agent}.npz', rewards=rewards)
+    rewards, times, n_events = rollout(seed=0, n_episodes=1, execution_agent=agent, market_type=env, volume=lots)
     end_time = time.time()
     execution_time = end_time - start_time
     print("Execution time:", execution_time)
-    # print(rewards)
-    print(f'mean rewards: {np.mean(rewards)}')
-    print(f'length of rewards: {len(rewards)}')
+    print(f'rewards: {rewards}')
+    print(f'times: {times}')
+
+    # rollout benchmark with multiprocessing 
+    # start_time = time.time()
+    # rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed)
+    # np.savez(f'raw_rewards/rewards_{env}_{lots}_{agent}.npz', rewards=rewards)
+    # end_time = time.time()
+    # execution_time = end_time - start_time
+    # print("Execution time:", execution_time)
+    # # print(rewards)
+    # print(f'mean rewards: {np.mean(rewards)}')
+    # print(f'length of rewards: {len(rewards)}')
     
     # start_time = time.time()
     # # this is only about 1 second slower than mp rollout for 100 samples and 80 cpus
