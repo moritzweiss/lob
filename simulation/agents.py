@@ -6,6 +6,27 @@ sys.path.append(parent)
 import numpy as np
 from limit_order_book.limit_order_book import LimitOrder, MarketOrder, CancellationByPriceVolume, Cancellation
 from config.config import noise_agent_config
+# for convolution 
+import torch 
+import scipy 
+from numba import njit
+
+@njit
+def convolve_columns_numba(arr, filter_kernel, stride=1):
+    num_rows, num_cols = arr.shape
+    filter_size = len(filter_kernel)
+    output_size = (num_rows - filter_size) // stride + 1
+    
+    convolved = np.empty((output_size, num_cols))
+    
+    for col in range(num_cols):
+        for out_row in range(output_size):
+            acc = 0.0
+            for k in range(filter_size):
+                acc += arr[out_row * stride + k, col] * filter_kernel[k]
+            convolved[out_row, col] = acc
+    
+    return convolved
 
 class NoiseAgent(): 
     def __init__(self, rng, 
@@ -624,7 +645,7 @@ class RLAgent(ExecutionAgent):
         # self.observation_space_length = self.n_lob_levels+1
         # currently just time and volume as observations 
         # self.observation_space_length = 2
-        self.observation_space_length = 17
+        self.observation_space_length = 117
         # time, inventory, mid price, spread, imbalance 
         # time, inventory, price
         # self.observation_space_length = 8
@@ -776,10 +797,56 @@ class RLAgent(ExecutionAgent):
 
         # probably a good idea to make this unit less. 
         # should also take imbalances     
-        #         
+                 
         average_shape = np.array([5,10,20,20])
         bid_v = (bid_v[:4]- average_shape)/average_shape
         ask_v = (ask_v[:4]- average_shape)/average_shape
+
+        # we are looking at 2 levels 
+        max_length = 50
+        max_level = 2 
+        queue_positions = np.zeros((max_length, max_level), dtype=np.float32)
+        for l in range(max_level):
+            pos = 0 
+            price = best_bid+l+1
+            if price in lob.price_map['ask']:
+                for id in lob.price_map['ask'][price]:
+                    volume = lob.order_map[id].volume
+                    agent_id = lob.order_map[id].agent_id
+                    if agent_id == self.agent_id:
+                        queue_positions[int(pos):int(pos+volume), l] = 1
+                    pos += volume        
+            else:  
+                pass
+        
+        queue_positions = queue_positions.flatten()
+        
+        # filt = np.array([1, 1, 1], dtype=np.float32).reshape(3,-1)
+        # queue_positions = scipy.signal.convolve2d(queue_positions, filt, mode='valid')[::3, :]
+        # queue_positions = queue_positions.flatten() 
+
+        # filt = np.array([1, 1, 1], dtype=np.float32)
+        # x= convolve_columns_numba(queue_positions, filt, 3)
+        # x.shape 
+
+        
+        # # filter queue positions 
+        # queue_positions = torch.from_numpy(queue_positions) 
+        # queue_positions = torch.unsqueeze(queue_positions, 0)
+        # queue_positions = torch.unsqueeze(queue_positions, 0)
+        # # (out channels, in channels, height, width) 
+        # weight = torch.tensor([[1.], [1.], [1.]], dtype=torch.float32)
+        # weight = torch.unsqueeze(weight, 0)
+        # weight = torch.unsqueeze(weight, 0)
+        # filtered = torch.nn.functional.conv2d(queue_positions, weight, padding=0, stride=(3,1))
+        # filtered = filtered.squeeze()
+        # filtered = filtered.numpy()/3        
+        # filtered = filtered.flatten()
+        # filtered.shape 
+
+        # bid_v = bid_v[:4]/average_shape
+        # ask_v = ask_v[:4]/average_shape
+
 
         # volume_per_level = np.array(volume_per_level, dtype=np.float32)/self.initial_volume
 
@@ -815,6 +882,8 @@ class RLAgent(ExecutionAgent):
         observation = np.array([time/self.terminal_time, self.volume/self.initial_volume, bid_price_drift, spread, imbalance], dtype=np.float32)
         observation = np.concatenate([observation, order_dist], dtype=np.float32)
         observation = np.concatenate([observation, bid_v, ask_v], dtype=np.float32)
+        # observation = np.concatenate([observation, filtered], dtype=np.float32)
+        observation = np.concatenate([observation, queue_positions], dtype=np.float32)
 
     
         return observation
