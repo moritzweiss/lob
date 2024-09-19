@@ -9,6 +9,7 @@ from typing import Callable, List
 import gymnasium as gym
 import torch
 from ppo_continuous_action import Agent 
+# from ppo_modified import Agent
 import numpy as np
 import time 
 
@@ -31,6 +32,7 @@ def evaluate(
     while len(episodic_returns) < eval_episodes:
         with torch.no_grad():
             actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
+            # actions, _, _ = agent.get_action(torch.Tensor(obs).to(device))
             next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
             # next_obs, _, _, _, infos = envs.step(actions.numpy())
         if "final_info" in infos:
@@ -60,9 +62,14 @@ if __name__=="__main__":
     # 40 lots noise 
     # model_path = 'runs/Market__ppo_continuous_action__0__1725552339_20lots_std3/ppo_continuous_action.cleanrl_model'
     # 20 lots flow 
-    model_path =  'runs/Market__ppo_continuous_action__0__1725555789_flow_20/ppo_continuous_action.cleanrl_model'
+    # model_path =  'runs/Market__ppo_continuous_action__0__1725555789_flow_20/ppo_continuous_action.cleanrl_model'
     # 40 lots flow 
-    model_path = 'runs/Market__ppo_continuous_action__0__1725559747_flow_40/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1725559747_flow_40/ppo_continuous_action.cleanrl_model'
+    # without clipping 
+    # model_path = 'runs/Market__ppo_modified__0__1725902028_flow_40_noclip/ppo_modified.cleanrl_model'
+    # model_path = 'runs/Market__ppo_modified__0__1725914125_flow_40_noclip/ppo_modified.cleanrl_model'
+    # model path with queues 
+    model_path = 'runs/Market__ppo_continuous_action__0__1726753861_flow_40_with_queues/ppo_continuous_action.cleanrl_model'
 
 
     t = time.time()

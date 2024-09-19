@@ -23,3 +23,5 @@ new_plots/*
 notebooks/* 
 runs
 runs/*
+raw_rewards/*
+
