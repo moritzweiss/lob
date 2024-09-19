@@ -170,6 +170,10 @@ class Data():
         # market trades 
         self.market_buy = []
         self.market_sell = []
+        # 
+        self.limit_buy = []
+        self.limit_sell = []
+        # 
         self.time_stamps = []
     
 
@@ -228,6 +232,13 @@ class LimitOrderBook:
             else:
                 self.data.market_buy.append(0)
                 self.data.market_sell.append(0)
+            if order.type == 'limit':
+                if order.side == 'bid':
+                    self.data.limit_buy.append(order.volume)
+                    self.data.limit_sell.append(0)
+                else:
+                    self.data.limit_sell.append(order.volume)
+                    self.data.limit_buy.append(0)
                 
         else: 
             # update last element in lists
@@ -245,6 +256,11 @@ class LimitOrderBook:
                     self.data.market_sell[-1] += order.volume
                 else:
                     self.data.market_buy[-1] += order.volume
+            if order.type == 'limit':
+                if order.side == 'bid':
+                    self.data.limit_buy[-1] += order.volume
+                else:
+                    self.data.limit_sell[-1] += order.volume
         
         self.time = order.time
 
