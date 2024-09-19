@@ -10,6 +10,7 @@ from config.config import noise_agent_config
 import torch 
 import scipy 
 from numba import njit
+import bisect 
 
 @njit
 def convolve_columns_numba(arr, filter_kernel, stride=1):
@@ -641,19 +642,12 @@ class RLAgent(ExecutionAgent):
         self.start_time = start_time
         self.terminal_time = terminal_time
         self.time_delta = time_delta
-        # v1, v2, v3
-        # self.observation_space_length = self.n_lob_levels+1
-        # currently just time and volume as observations 
-        # self.observation_space_length = 2
-        self.observation_space_length = 117
-        # time, inventory, mid price, spread, imbalance 
-        # time, inventory, price
-        # self.observation_space_length = 8
-        # time and inventory 
-        # action length: market, l1, l2, l3, inactive: n_levels+market+inactive
+        # observation space length depends on features and queue positions, see the code below 
+        # note: adding queue positions did not improve the result in the flow 40 case 
+        self.observation_space_length = 120
         # market, l1, l2, inactive
         self.action_space_length = 4
-        # l1, l2 
+        # l1, l2 what is this used for ? 
         self.n_lob_levels = 2
         # action length = 5 --> 3 order book levels --> 3 levels observed: l1, l2, l3, inactive: 4 = 5-4 
         assert self.n_lob_levels >= self.action_space_length-2
@@ -802,7 +796,7 @@ class RLAgent(ExecutionAgent):
         bid_v = (bid_v[:4]- average_shape)/average_shape
         ask_v = (ask_v[:4]- average_shape)/average_shape
 
-        # we are looking at 2 levels 
+        # record queue positiosn for the first two levels  
         max_length = 50
         max_level = 2 
         queue_positions = np.zeros((max_length, max_level), dtype=np.float32)
@@ -817,10 +811,34 @@ class RLAgent(ExecutionAgent):
                         queue_positions[int(pos):int(pos+volume), l] = 1
                     pos += volume        
             else:  
-                pass
-        
+                pass        
         queue_positions = queue_positions.flatten()
+
         
+        # market order imbalance 
+        time_delta = 15
+        buys = [x for x, t in zip(lob.data.market_buy, lob.data.time_stamps) if t >= time-time_delta and t <= time]  
+        sells = [x for x, t in zip(lob.data.market_sell, lob.data.time_stamps) if t >= time-time_delta and t <= time]  
+        if np.sum(buys) + np.sum(sells) == 0:
+            market_order_imbalance = 0
+        else:
+            market_order_imbalance = (np.sum(buys) - np.sum(sells))/(np.sum(buys) + np.sum(sells))
+        market_order_imbalance = np.array([market_order_imbalance], dtype=np.float32)
+        # limit order imbalance 
+        limit_buys = [x for x, t in zip(lob.data.limit_buy, lob.data.time_stamps) if t >= time-time_delta and t <= time]
+        limit_sells = [x for x, t in zip(lob.data.limit_sell, lob.data.time_stamps) if t >= time-time_delta and t <= time]
+        if np.sum(limit_buys) + np.sum(limit_sells) == 0:
+            limit_order_imbalance = 0
+        else:
+            limit_order_imbalance = (np.sum(limit_buys) - np.sum(limit_sells))/(np.sum(limit_buys) + np.sum(limit_sells))
+        limit_order_imbalance = np.array([limit_order_imbalance], dtype=np.float32)
+        # mid price drift from t-delta t to t 
+        assert time >= lob.data.time_stamps[-1]
+        idx_old = bisect.bisect_left(lob.data.time_stamps, time-time_delta)
+        mid_price_old = (lob.data.best_bid_prices[idx_old] + lob.data.best_ask_prices[idx_old])/2 
+        mid_price_now = (lob.data.best_bid_prices[-1] + lob.data.best_ask_prices[-1])/2
+        deltat_drift = np.array([(mid_price_now - mid_price_old)/10], dtype=np.float32)
+                        
         # filt = np.array([1, 1, 1], dtype=np.float32).reshape(3,-1)
         # queue_positions = scipy.signal.convolve2d(queue_positions, filt, mode='valid')[::3, :]
         # queue_positions = queue_positions.flatten() 
@@ -880,6 +898,7 @@ class RLAgent(ExecutionAgent):
         # observation = np.array([time/self.terminal_time, self.volume/self.initial_volume], dtype=np.float32)
 
         observation = np.array([time/self.terminal_time, self.volume/self.initial_volume, bid_price_drift, spread, imbalance], dtype=np.float32)
+        observation = np.concatenate([observation, market_order_imbalance, limit_order_imbalance, deltat_drift], dtype=np.float32)
         observation = np.concatenate([observation, order_dist], dtype=np.float32)
         observation = np.concatenate([observation, bid_v, ask_v], dtype=np.float32)
         # observation = np.concatenate([observation, filtered], dtype=np.float32)
