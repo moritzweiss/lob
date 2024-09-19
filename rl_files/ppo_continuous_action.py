@@ -114,8 +114,8 @@ def new_layer_init(layer):
 class ActorNetwork(nn.Module):
     def __init__(self, observation_size, action_size):
         super().__init__()
-        self.l1 = nn.Linear(observation_size, 64)
-        self.l2 = nn.Linear(64, 64)
+        self.l1 = nn.Linear(observation_size, 128)
+        self.l2 = nn.Linear(128, 64)
         self.l3 = nn.Linear(64, action_size)
         self.tanh = nn.Tanh()
         self.sofplus = nn.Softplus()
