@@ -3,7 +3,7 @@ import os
 
 import random
 import time
-from dataclasses import dataclawss
+from dataclasses import dataclass
 
 import gymnasium as gym
 import numpy as np
@@ -53,13 +53,13 @@ class Args:
     env_id: str = "Market"
     """the id of the environment"""
     # total_timesteps: int = 1000000
-    total_timesteps: int = 2*30
+    total_timesteps: int = 150*100*100
     """total timesteps of the experiments"""
     learning_rate: float = 1e-2
     """the learning rate of the optimizer"""
-    num_envs: int = 2
+    num_envs: int = 100
     """the number of parallel game environments"""
-    num_steps: int = 30
+    num_steps: int = 100
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -73,7 +73,7 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 10.0
+    clip_coef: float = 0.5
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_{market_env}_{volume}"
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_{market_env}_{volume}_with_queues"
     if args.track:
         import wandb
 
@@ -283,6 +283,8 @@ if __name__ == "__main__":
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
         returns = []
+        times = []
+        drifts = []
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
             lrnow = frac * args.learning_rate
@@ -311,13 +313,17 @@ if __name__ == "__main__":
                 for info in infos["final_info"]:
                     if info is not None:
                         returns.append(info['cum_reward'])
+                        times.append(info['time'])
+                        drifts.append(info['drift'])
                         # print(f"global_step={global_step}, episodic_return={info['cum_reward']}")
                         # if info and "episode" in info:
                         #     print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                         #     writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         #     writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
         
-        writer.add_scalar("charts/iteration_return", np.mean(returns), global_step)
+        writer.add_scalar("charts/return", np.mean(returns), global_step)
+        writer.add_scalar("charts/time", np.mean(times), global_step)
+        writer.add_scalar("charts/drift", np.mean(drifts), global_step)
         print(f'iteration={iteration}')
             
 
