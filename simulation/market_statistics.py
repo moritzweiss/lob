@@ -42,10 +42,12 @@ class Market():
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
+        terminal_time = 200
+
         # noise agent setting
         noise_agent_config['rng'] = np.random.default_rng(seed)
         noise_agent_config['unit_volume'] = False
-        noise_agent_config['terminal_time'] = 150
+        noise_agent_config['terminal_time'] = terminal_time
         noise_agent_config['start_time'] = 0
         noise_agent_config['fall_back_volume'] = 5
         if market_env == 'noise':
@@ -55,7 +57,7 @@ class Market():
         else: 
             noise_agent_config['imbalance_reaction'] = True
             noise_agent_config['imbalance_factor'] = 2.0
-            noise_agent_config['damping_factor'] = 0.75
+            noise_agent_config['damping_factor'] = 0.1
             agent = NoiseAgent(**noise_agent_config)
             # noise_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75_unit.npz'
             agent.limit_intensities = agent.limit_intensities * 0.85
@@ -69,6 +71,8 @@ class Market():
             strategic_agent_config['market_volume'] = 1
             strategic_agent_config['limit_volume'] = 1
             strategic_agent_config['rng'] = np.random.default_rng(seed)
+            strategic_agent_config['terminal_time'] = terminal_time
+            strategic_agent_config['start_time'] = 0
             agent = StrategicAgent(**strategic_agent_config)
             self.agents[agent.agent_id] = agent 
         
@@ -155,17 +159,17 @@ def mp_rollout(n_samples, n_cpus, market_type):
 
 if __name__ == '__main__':
     ## test 
-    out = rollout(seed=0, num_episodes=10, market_type='noise')
-    print(out)
+    # out = rollout(seed=0, num_episodes=10, market_type='noise')
+    # print(out)
     # out = mp_rollout(n_samples=100, n_cpus=10, market_type='flow')
     # print(out)
     # 
     # envs = ['noise', 'flow', 'strategic']
     envs = ['noise', 'flow']
     # n_samples = 1000
-    n_samples = 5000
+    n_samples = 2000
     # n_cpus = 80
-    n_cpus = 80
+    n_cpus = 70
     results = {f'n_events': [],'drift_mean': [], 'drift_std': [], 'trades': [], 'trades_std': [], 'buy_orders': [], 'sell_orders': []} 
     data_drifts = {}
     data_for_trade_plot = {}
@@ -189,7 +193,7 @@ if __name__ == '__main__':
     results = pd.DataFrame.from_dict(results).round(2)
     results.index = envs 
     print(results)
-    results.to_csv(f'results/market_stats.csv')
+    results.to_csv(f'results/market_stats_std8.csv')
 
     # histogram of drifts 
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -203,7 +207,7 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.xlim(-4, 4)
     # plt.tight_layout()
-    plt.savefig('plots/mid_price_drift_std2.pdf')
+    plt.savefig('plots/mid_price_drift_std3_200.pdf')
     plt.figure(figsize=(10, 6))
 
 
@@ -217,4 +221,4 @@ if __name__ == '__main__':
     plt.title('Number of Trades', fontsize=16)
     plt.ylabel('Frequency')
     # plt.tight_layout()
-    plt.savefig('plots/kde_trades_std2.pdf')
+    plt.savefig('plots/kde_trades_std3_200.pdf')
