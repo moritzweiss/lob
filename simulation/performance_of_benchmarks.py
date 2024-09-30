@@ -15,26 +15,28 @@ import time
 
 
 class Market():
-    def __init__(self, market_env='noise', execution_agent='sl_agent', volume=10, seed=0):
+    def __init__(self, market_env='noise', execution_agent='sl_agent', volume=10, seed=0, terminal_time=300, time_delta=30):
         
         assert market_env in ['noise', 'flow', 'strategic']
         assert execution_agent in ['market_agent', 'sl_agent', 'linear_sl_agent']
 
         self.agents = {}
+        self.terminal_time = terminal_time
         
         # initial agent         
         if market_env == 'noise':
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'
+            initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise.npz'
         else:
             # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
+            initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_75.npz'
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
+
 
         # noise agent 
         noise_agent_config['rng'] = np.random.default_rng(seed)
         noise_agent_config['unit_volume'] = False
-        noise_agent_config['terminal_time'] = 150
+        noise_agent_config['terminal_time'] = terminal_time
         noise_agent_config['start_time'] = 0 
         noise_agent_config['fall_back_volume'] = 5
         # TODO: make start time more consistent 
@@ -45,6 +47,7 @@ class Market():
         else: 
             noise_agent_config['imbalance_reaction'] = True
             noise_agent_config['imbalance_factor'] = 2.0
+            noise_agent_config['damping_factor'] = 0.1
             agent = NoiseAgent(**noise_agent_config)            
         # TODO: make those intensity adjustments automatically 
             agent.limit_intensities = agent.limit_intensities * 0.85
@@ -54,7 +57,9 @@ class Market():
 
         # strategic agent 
         if market_env == 'strategic':
-            strategic_agent_config['time_delta'] = 7.5
+            strategic_agent_config['start_time'] = 0
+            strategic_agent_config['terminal_time'] = terminal_time
+            strategic_agent_config['time_delta'] = time_delta
             strategic_agent_config['market_volume'] = 1
             strategic_agent_config['limit_volume'] = 1
             strategic_agent_config['rng'] = np.random.default_rng(seed)
@@ -64,18 +69,19 @@ class Market():
         # execution agent
         if execution_agent == 'market_agent':
             sl_agent_config['start_time'] = 0
+            market_agent_config['terminal_time'] = terminal_time
             market_agent_config['volume'] = volume
             agent = MarketAgent(**market_agent_config)
         elif execution_agent == 'sl_agent':
             sl_agent_config['start_time'] = 0
+            sl_agent_config['terminal_time'] = terminal_time
             sl_agent_config['volume'] = volume
-            sl_agent_config['terminal_time'] = 150
             agent = SubmitAndLeaveAgent(**sl_agent_config)
         else: 
             linear_sl_agent_config['start_time'] = 0
+            linear_sl_agent_config['terminal_time'] = terminal_time
             linear_sl_agent_config['volume'] = volume
-            linear_sl_agent_config['terminal_time'] = 150
-            linear_sl_agent_config['time_delta'] = 15
+            linear_sl_agent_config['time_delta'] = time_delta
             agent = LinearSubmitLeaveAgent(**linear_sl_agent_config)
         self.agents[agent.agent_id] = agent
         self.execution_agent_id = agent.agent_id
@@ -114,9 +120,17 @@ class Market():
                 break
             # if not terminated or execution agent not present, generate a new event 
             # can be None if there are no more events happening for the agent 
+            if time == self.terminal_time:
+                if self.agents[self.execution_agent_id].volume > 0:
+                    print("Execution agent did not get filled")
+                    print(f'remaining volume: {self.agents[self.execution_agent_id].volume}')
+                    break
+                else:
+                    pass 
             out = self.agents[event].new_event(time, event)
             if out is not None:
                 self.pq.put(out)
+
 
         return self.agents[self.execution_agent_id].cummulative_reward, self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume, n_events  
 
@@ -154,13 +168,13 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume):
 
 if __name__ == '__main__':
 
-    # start_time = time.time()
-    # rewards, fill_rates, n_events = rollout(seed=0, num_episodes=10, execution_agent='sl_agent', market_type='flow', volume=10)
-    # end_tine = time.time()
-    # execution_time = end_tine - start_time
-    # print("Execution time:", execution_time)
-    # print(rewards)
-    # print(fill_rates)
+    start_time = time.time()
+    rewards, fill_rates, n_events = rollout(seed=0, num_episodes=10, execution_agent='sl_agent', market_type='flow', volume=100)
+    end_tine = time.time()
+    execution_time = end_tine - start_time
+    print("Execution time:", execution_time)
+    print(rewards)
+    print(fill_rates)
 
     # n_samples = 100
     # n_cpus = 10
@@ -181,8 +195,8 @@ if __name__ == '__main__':
     n_samples = 1000
     n_cpus = 70
     start_time = time.time()
-    for lots in [10, 40]:
-        # print(lots)
+    for lots in [30, 60]:
+        print(lots)
         results = {}
         for agent in ['sl_agent', 'linear_sl_agent']:
             results[f'{agent}_reward_mean'] = []
