@@ -20,9 +20,11 @@ from config.config import noise_agent_config, initial_agent_config
 from queue import PriorityQueue
 
 
-
 def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, 
-                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, totol_trades_window=1000):
+                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, totol_trades_window=1000, level=30):
+
+    level = 50
+
     agents = {}
 
     # noise agent 
@@ -33,19 +35,22 @@ def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_fact
     noise_agent_config['unit_volume'] = False
     noise_agent_config['terminal_time'] = np.inf 
     noise_agent_config['fall_back_volume'] = initial_shape
+    noise_agent_config['level'] = level 
     if shape_file is not None:
         noise_agent_config['initial_shape_file'] = shape_file
-    agent = NoiseAgent(**noise_agent_config)
+
+    agent = NoiseAgent(**noise_agent_config)    
     agents[agent.agent_id] = agent
 
     # initial agent
     initial_agent_config['initial_shape'] = initial_shape
+    initial_agent_config['n_initial_levels'] = level
     agent = InitialAgent(**initial_agent_config)
     agents[agent.agent_id] = agent
 
     # LOB 
     list_of_agents = [agent.agent_id for agent in agents.values()]
-    LOB = LimitOrderBook(list_of_agents=list_of_agents, level=30, only_volumes=True)
+    LOB = LimitOrderBook(list_of_agents=list_of_agents, level=level, only_volumes=True)
 
     # reset agents 
     for agent in agents.values():
@@ -126,14 +131,14 @@ def trades_hist(trades, trades_imb):
     plt.tight_layout()
     plt.savefig('plots/trades_histogram.pdf', dpi=350)
 
-def plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=10):
+def plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=30):
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv, askv, level=level, file_name=f'noise', title='noise', ax=axs)
     fig.tight_layout()
     fig.savefig(f'plots/average_shape_noise_{name}.pdf', dpi=350)
     # 
     fig, axs = plt.subplots(figsize=(10, 6))
-    plot_average_book_shape(bidv_imb, askv_imb, level=10, file_name=f'noise_flow', title=f'noise+flow', ax=axs)        
+    plot_average_book_shape(bidv_imb, askv_imb, level=level, file_name=f'noise_flow', title=f'noise+flow', ax=axs)        
     fig.tight_layout()
     fig.savefig(f'plots/average_shape_flow_{name}.pdf', dpi=350)
     # 
@@ -161,11 +166,14 @@ if __name__ == '__main__':
     # compute average statistics 
     # bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = get_statistics(n_steps=int(1e2), rng=default_rng(0), initial_shape=5, damping_factor=0.5, imbalance=False, frequency=10, totol_trades_window=10)
     # compute average statistics using multiprocessing
+    # damping_factor = 0.75
+    damping_factor = 65
+    n_samples = int(5e6)
     start_time = timeit.default_timer()
-    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=int(1e6), n_cpus=80, initial_shape=1, damping_factor=0.85, imbalance=False, frequency=100, total_trades_window=100)
-    # np.savez('initial_shape/noise.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=int(1e6), n_cpus=60, initial_shape=1, damping_factor=0.75, imbalance=True, imbalance_factor=2, frequency=100, total_trades_window=100)
-    # np.savez('initial_shape/noise_flow_75.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=80, initial_shape=1, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=100)
+    np.savez(f'initial_shape/noise_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=n_samples, n_cpus=60, initial_shape=1, damping_factor=damping_factor/100, imbalance=True, imbalance_factor=2.0, frequency=100, total_trades_window=100)
+    np.savez(f'initial_shape/noise_flow_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
     end_time = timeit.default_timer()
     print(f"Execution time: {end_time - start_time} seconds")
     # plot one price trajectory 
@@ -174,8 +182,8 @@ if __name__ == '__main__':
     # print(f"average time step noise = {np.mean(average_time_step)}")
     # print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
     # #####    
-    name = 'std2'
-    plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=30)
+    name = f'damping_{damping_factor}'
+    plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=50)
     # maybe bar plots make more sense here ?? 
     # trades_hist(trades, trades_imb)
     plot_mid_price_changes(name=name, midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
