@@ -42,7 +42,7 @@ class Args:
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_model: bool = True
-    """whether to save model into the `runs/{run_name}` folder"""
+    """whether to save model into the `runs_std4/{run_name}` folder"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
@@ -53,12 +53,15 @@ class Args:
     env_id: str = "Market"
     """the id of the environment"""
     # total_timesteps: int = 1000000
-    total_timesteps: int = 150*100*100
+    total_timesteps: int = 200*70*100
+    # total_timesteps: int = 10
     """total timesteps of the experiments"""
     learning_rate: float = 1e-2
     """the learning rate of the optimizer"""
-    num_envs: int = 100
+    # num_envs: int = 100
+    num_envs: int = 70
     """the number of parallel game environments"""
+    # num_steps: int = 10
     num_steps: int = 100
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
@@ -113,10 +116,11 @@ def new_layer_init(layer):
 
 class ActorNetwork(nn.Module):
     def __init__(self, observation_size, action_size):
+        # try deeper networks 
         super().__init__()
         self.l1 = nn.Linear(observation_size, 128)
-        self.l2 = nn.Linear(128, 64)
-        self.l3 = nn.Linear(64, action_size)
+        self.l2 = nn.Linear(128, 128)
+        self.l3 = nn.Linear(128, action_size)
         self.tanh = nn.Tanh()
         self.sofplus = nn.Softplus()
         # self.actor_mean = nn.Sequential(
@@ -180,20 +184,21 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class Agent(nn.Module):
     def __init__(self, envs):
+        n_hidden_units = 128 
         super().__init__()
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)), std=0.01),
         )
         # changed to reqires_grad=False
         # setting requires_grad=True yields better results: HOW IS THIS UPDATED ? 
@@ -218,7 +223,7 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     ###
-    volume = 40
+    volume = 60
     market_env = 'flow'
     ###
     args = tyro.cli(Args)
@@ -226,7 +231,7 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_{market_env}_{volume}_with_queues"
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_{market_env}_{volume}"
     if args.track:
         import wandb
 
@@ -239,7 +244,7 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(f"runs_t200_std2/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -258,6 +263,7 @@ if __name__ == "__main__":
     env_fns = [make_env(config) for config in configs]
     envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    observation, info = envs.reset(seed=args.seed)
 
     agent = Agent(envs).to(device)
     # print(agent)
@@ -429,7 +435,7 @@ if __name__ == "__main__":
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"runs_t200_std2/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
 
