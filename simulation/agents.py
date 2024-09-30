@@ -555,7 +555,7 @@ class SubmitAndLeaveAgent(ExecutionAgent):
     
     def new_event(self, time, event):
         assert event == self.agent_id
-        assert time == self.start_time
+        assert time == self.start_time, f'time : {time}, start time : {self.start_time}, event : {event}'
         assert self.volume > 0 
         # TODO: add logic for the terminal time step !! 
         return (self.terminal_time, self.priority, self.agent_id)
@@ -635,8 +635,25 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
 class RLAgent(ExecutionAgent):
     """
         - this agent takes in an action and then generates an order
+
+        attributes: 
+            - ... 
+        
+        methods:
+            - ... 
     """
-    def __init__(self, volume, terminal_time, start_time, time_delta, priority) -> None:
+    def __init__(self, action_book_levels, observation_book_levels, volume, terminal_time, start_time, time_delta, priority) -> None:
+        """
+        args:
+            - action_book_levels: for example if this is = 2, post on the first two levels of the order book, action space is then [m,l1,l2,inactive]
+            - observation_book_levels: for example if this is = 2, observe the first two levels of the order book
+            - volume: volume to be traded
+            - terminal_time: terminal time of the agent
+            - start_time: start time of the agent
+            - time_delta: time delta between actions 
+            - priority: priority of the agent
+        """
+        assert action_book_levels >= 1, 'action book levels must be at least 1'
         super().__init__(volume, 'rl_agent', priority)
         self.orders_within_range = set()
         self.start_time = start_time
@@ -644,38 +661,42 @@ class RLAgent(ExecutionAgent):
         self.time_delta = time_delta
         # observation space length depends on features and queue positions, see the code below 
         # note: adding queue positions did not improve the result in the flow 40 case 
-        self.observation_space_length = 120
+        # currently no better idea than setting this manually 
+        self.observation_space_length = 179
+        self.observation_book_levels = observation_book_levels
         # market, l1, l2, inactive
-        self.action_space_length = 4
-        # l1, l2 what is this used for ? 
-        self.n_lob_levels = 2
-        # action length = 5 --> 3 order book levels --> 3 levels observed: l1, l2, l3, inactive: 4 = 5-4 
-        assert self.n_lob_levels >= self.action_space_length-2
-            
+        self.action_space_length = action_book_levels + 2 
+        self.action_book_levels = action_book_levels
+        
     def generate_order(self, lob, time, action):
-        """
-            - action is np.array. for example 0: market order, 1 limit order first level, 2 limit order second level, 3 limit order third level, 4 inactive
-            - if action is not in the simplex, we normalize it, such that its part of the simplex 
-            - lob: current statte of the order book 
-            - time: current time 
-            - return the list of orders
+        """ 
+            input: 
+                - action: 
+                    - action is np.array 
+                    - for example if action is np.array of length 6:  a[0] = market order, a[1] = limit first level, a[2] = limit second level, a[3] = limit third level, a[4] = limit forth level, a[5] = inactive orders
+                    - if action is not in the simplex, we normalize it, such that its part of the simplex (at the moment we always normalize)                 
+                - lob: current statte of the order book 
+                - time: current time 
+
+            returns: 
+                - order_list: list of orders to be placed
+
         """
         assert self.start_time <= time <= self.terminal_time
         assert (time-self.start_time) % self.time_delta == 0, 'time must be divisible by time delta'
+        assert len(action) == self.action_space_length, 'action length must be equal to action space length'
 
-        if time >= self.start_time and time < self.terminal_time:
-            # assert len(self.volume_per_level) >= len(action)-2
-            
-            # normalize action such that its part of the simples 
+        if time >= self.start_time and time < self.terminal_time:            
+            # normalize action such that its part of the simplex 
             action = np.exp(action)/np.sum(np.exp(action), axis=0)
             best_bid = lob.get_best_price('bid')
             
-            # target volumes 
+            # target volumes: 
+            # translate percentages to absolute value  
+            # [market%, l1% ,l2%, ,l3%, l4%, inactive%] to [market, l1, l2, l3, l4, inactive]
             target_volumes = []
             available_volume = self.volume 
-            for l in range(len(action)):
-                # [market, l1 ,l2, ,l3, inactive] or 
-                # [market, l1, inactive]
+            for l in range(self.action_space_length):
                 # np.round rounds values in [0, 0.5] to 0, and values in [0.5, 1] to 1 
                 volume_on_level = min(np.round(action[l]*self.volume).astype(int), available_volume)
                 assert volume_on_level >= 0
@@ -686,45 +707,42 @@ class RLAgent(ExecutionAgent):
             assert sum(target_volumes) == self.volume
 
             # get agent order allocation 
-            # TODO: make level here explicit 
-            volume_per_level, orders_within_range = self.get_order_allocation(lob)            
-            # volume per level: l1, l2, l>=3
-            # action: market, l1, l2, inactive
-            assert len(volume_per_level) + 1 == len(action)
-
-            # cancel orders above threshhold level 
+            # if self.action_book_levels == 2, then volume_per_level = [l1, l2, l>2]
+            volume_per_level, orders_within_range = self.get_order_allocation(lob, self.action_book_levels)            
+            if self.action_book_levels >= 1:
+                assert len(volume_per_level) + 1 == len(action)
+            
+            # cancel orders above best_bid+self.action_book_levels
             cancelled_volume = 0
             order_list = []
-            # cancel orders that are on levels >= l4 
             orders_to_cancel = lob.order_map_by_agent[self.agent_id].difference(orders_within_range)
             for order_id in orders_to_cancel:
                 order_list.append(Cancellation(self.agent_id, order_id, time))
                 cancelled_volume += lob.order_map[order_id].volume            
-            # last entry of self.volume_per_level contains volume on levels >= l4
+            # last entry of self.volume_per_level contains volume on levels >= best_bid+self.action_book_levels
             assert cancelled_volume == volume_per_level[-1]
             
-            # TODO: many of these statistics could be tracked directly in the order book ! 
-            volume_per_level.insert(0, 0)
+            # add 0 for the market order, just so the index is aligned 
             # volume per level is now [0, l1, l2, l3, l4, inactive]
-            # added zero for convenience
+            # target volumes: market, l1, l2, ..., ln, inactive 
+            # volumes_per_level: 0, l1, l2, l3, ..., ln, l_>=n+1
+            volume_per_level.insert(0, 0)
             l = 0 
             m = 0 
             for level in range(len(action)-1): 
-                # 0, 1, 2, 3
                 if level == 0:
                     if target_volumes[level] > 0:
                         order = MarketOrder(self.agent_id, 'bid', target_volumes[level], time)
                         order_list.append(order)
                         m = target_volumes[level]
                 else:
-                    # target volumes: market, l1, l2, ..., ln, inactive 
-                    # volumes_per_level: 0, l1, l2, l3, ..., ln, l_>=n+1
                     diff = target_volumes[level] - volume_per_level[level]
                     limit_price = best_bid+level
                     if diff > 0:
                         order_list.append(LimitOrder(self.agent_id, 'ask', limit_price, diff, time))
                         l += diff
                     elif diff < 0:
+                        # need to insert cancellations first in the list, such that the budget is free                         
                         order_list.insert(0, CancellationByPriceVolume(agent_id=self.agent_id, side='ask', price=limit_price, volume=-diff, time=time))
                         cancelled_volume += -diff
                     else:
@@ -733,7 +751,6 @@ class RLAgent(ExecutionAgent):
             assert cancelled_volume >= 0
             assert l >= 0
             assert m >= 0
-            # cancelled + inactive == new free budget 
             free_budget = cancelled_volume + (self.volume - self.active_volume) 
             assert 0 <= free_budget <= self.volume
             assert 0 <= l + m <= free_budget, 'l + m must be less than or equal to the free budget'
@@ -750,33 +767,36 @@ class RLAgent(ExecutionAgent):
             - computes observations 
             - returns observations
 
-        TODO: self.volume_per_level is set as a side effect. this is not optimal 
-        functions with side effects should be avoided ideally 
         """
         if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid') 
             self.reference_ask_price = lob.get_best_price('ask')
             self.reference_mid_price = (self.reference_bid_price + self.reference_ask_price)/2
             
-        # bid price drift, spread, imbalance, volumes 
+        # bid and mid price, spread
         best_bid = lob.data.best_bid_prices[-1]
         best_ask = lob.data.best_ask_prices[-1]
         mid_price = (best_bid + best_ask)/2
         bid_price_drift = (best_bid - self.reference_bid_price)/10
         mid_price_drift = (mid_price - self.reference_mid_price)/10
-        spread = (best_ask - best_bid)/10
-        bid_volumes = lob.data.bid_volumes[-1][:5]
-        ask_volumes = lob.data.ask_volumes[-1][:5]        
+        spread = (best_ask - best_bid)/10        
+
+        # volumes and imbalance 
+        bid_volumes = lob.data.bid_volumes[-1][:self.observation_book_levels]
+        ask_volumes = lob.data.ask_volumes[-1][:self.observation_book_levels]        
         if np.sum(bid_volumes+ask_volumes) == 0:
-            print('bid+ask volumes are zero')
+            print('first 5 bid+ask volumes are zero')
+            print(f'all bid vols: {lob.data.bid_volumes[-1]}')
+            print(f'all ask vols: {lob.data.ask_volumes[-1]}')
             imbalance = 0
         else:
             imbalance = np.sum(bid_volumes - ask_volumes)/np.sum(bid_volumes + ask_volumes)
-        # imbalance = (np.sum(bidv) - np.sum(askv))/(np.sum(bidv) + np.sum(askv))
-        # TODO: remove the hard coding of levels here 
-        # 1,2,3
-        # feature generation 
-        volume_per_level, _ = self.get_order_allocation(lob)
+        # normalize volumes
+        bid_volumes /= 20
+        ask_volumes /= 20
+
+        # order distribution 
+        volume_per_level, _ = self.get_order_allocation(lob, self.observation_book_levels)
         volume_per_level.append(self.volume-self.active_volume)
         order_dist = np.array(volume_per_level)
         assert np.sum(order_dist) == self.volume        
@@ -785,20 +805,9 @@ class RLAgent(ExecutionAgent):
         else:
             order_dist = np.array(order_dist, dtype=np.float32)/self.volume
 
-        # bid and ask volumes 
-        _, bid_v = lob.level2('bid')
-        _, ask_v = lob.level2('ask')
-
-        # probably a good idea to make this unit less. 
-        # should also take imbalances     
-                 
-        average_shape = np.array([5,10,20,20])
-        bid_v = (bid_v[:4]- average_shape)/average_shape
-        ask_v = (ask_v[:4]- average_shape)/average_shape
-
-        # record queue positiosn for the first two levels  
+        # record queue position for the first two levels  
         max_length = 50
-        max_level = 2 
+        max_level = 3 ## maybe change this later to self.observation_book_levels 
         queue_positions = np.zeros((max_length, max_level), dtype=np.float32)
         for l in range(max_level):
             pos = 0 
@@ -816,17 +825,16 @@ class RLAgent(ExecutionAgent):
 
         
         # market order imbalance 
-        time_delta = 15
-        buys = [x for x, t in zip(lob.data.market_buy, lob.data.time_stamps) if t >= time-time_delta and t <= time]  
-        sells = [x for x, t in zip(lob.data.market_sell, lob.data.time_stamps) if t >= time-time_delta and t <= time]  
+        buys = [x for x, t in zip(lob.data.market_buy, lob.data.time_stamps) if t >= time-self.time_delta and t <= time]  
+        sells = [x for x, t in zip(lob.data.market_sell, lob.data.time_stamps) if t >= time-self.time_delta and t <= time]  
         if np.sum(buys) + np.sum(sells) == 0:
             market_order_imbalance = 0
         else:
             market_order_imbalance = (np.sum(buys) - np.sum(sells))/(np.sum(buys) + np.sum(sells))
         market_order_imbalance = np.array([market_order_imbalance], dtype=np.float32)
         # limit order imbalance 
-        limit_buys = [x for x, t in zip(lob.data.limit_buy, lob.data.time_stamps) if t >= time-time_delta and t <= time]
-        limit_sells = [x for x, t in zip(lob.data.limit_sell, lob.data.time_stamps) if t >= time-time_delta and t <= time]
+        limit_buys = [x for x, t in zip(lob.data.limit_buy, lob.data.time_stamps) if t >= time-self.time_delta and t <= time]
+        limit_sells = [x for x, t in zip(lob.data.limit_sell, lob.data.time_stamps) if t >= time-self.time_delta and t <= time]
         if np.sum(limit_buys) + np.sum(limit_sells) == 0:
             limit_order_imbalance = 0
         else:
@@ -834,113 +842,56 @@ class RLAgent(ExecutionAgent):
         limit_order_imbalance = np.array([limit_order_imbalance], dtype=np.float32)
         # mid price drift from t-delta t to t 
         assert time >= lob.data.time_stamps[-1]
-        idx_old = bisect.bisect_left(lob.data.time_stamps, time-time_delta)
+        idx_old = bisect.bisect_left(lob.data.time_stamps, time-self.time_delta)
         mid_price_old = (lob.data.best_bid_prices[idx_old] + lob.data.best_ask_prices[idx_old])/2 
         mid_price_now = (lob.data.best_bid_prices[-1] + lob.data.best_ask_prices[-1])/2
         deltat_drift = np.array([(mid_price_now - mid_price_old)/10], dtype=np.float32)
                         
-        # filt = np.array([1, 1, 1], dtype=np.float32).reshape(3,-1)
-        # queue_positions = scipy.signal.convolve2d(queue_positions, filt, mode='valid')[::3, :]
-        # queue_positions = queue_positions.flatten() 
-
-        # filt = np.array([1, 1, 1], dtype=np.float32)
-        # x= convolve_columns_numba(queue_positions, filt, 3)
-        # x.shape 
-
-        
-        # # filter queue positions 
-        # queue_positions = torch.from_numpy(queue_positions) 
-        # queue_positions = torch.unsqueeze(queue_positions, 0)
-        # queue_positions = torch.unsqueeze(queue_positions, 0)
-        # # (out channels, in channels, height, width) 
-        # weight = torch.tensor([[1.], [1.], [1.]], dtype=torch.float32)
-        # weight = torch.unsqueeze(weight, 0)
-        # weight = torch.unsqueeze(weight, 0)
-        # filtered = torch.nn.functional.conv2d(queue_positions, weight, padding=0, stride=(3,1))
-        # filtered = filtered.squeeze()
-        # filtered = filtered.numpy()/3        
-        # filtered = filtered.flatten()
-        # filtered.shape 
-
-        # bid_v = bid_v[:4]/average_shape
-        # ask_v = ask_v[:4]/average_shape
-
-
-        # volume_per_level = np.array(volume_per_level, dtype=np.float32)/self.initial_volume
-
-        # out = np.array([time/self.terminal_time, self.volume/self.initial_volume, self.active_volume/self.initial_volume, (self.volume-self.active_volume)/self.initial_volume, bid_move, spread], dtype=np.float32)
-
-        # out = np.concatenate([out, volume_per_level, bid_v, ask_v], dtype=np.float32)
-
-        # add 4th level imbalance
-        # if np.sum(bid_v[:6]) + np.sum(ask_v[:6]) == 0:
-        #     # print('zero bid/ask volumes')
-        #     # print(bid_v[:4])
-        #     # print(ask_v[:4])            
-        #     imbalance = 0
-        # else:
-        #     # print('zero bid/ask volumes')
-        #     # print(bid_v[:4])
-        #     # print(ask_v[:4])       
-        #     imbalance = (np.sum(bid_v[:6]) - np.sum(ask_v[:6]))/(np.sum(bid_v[:6]) + np.sum(ask_v[:6]))
-        # imbalance = np.array([imbalance], dtype=np.float32)
-        # out = np.append(out, imbalance, dtype=np.float32)
-        # out = np.concatenate([out, imbalance])
-        # print(f'imbalance: {imbalance}')
-
-        # 
-
-        # observation = np.array([time/self.terminal_time, self.volume/self.initial_volume, mid_price_drift, spread, imbalance], dtype=np.float32)
-
-        # first = np.array([time/self.terminal_time, self.volume/self.initial_volume, imbalance], dtype=np.float32)
-        # observation = np.concatenate([first, order_dist], dtype=np.float32)
-
-        # observation = np.array([time/self.terminal_time, self.volume/self.initial_volume], dtype=np.float32)
-
-        observation = np.array([time/self.terminal_time, self.volume/self.initial_volume, bid_price_drift, spread, imbalance], dtype=np.float32)
+        # concat everything into one observation 
+        observation = np.array([time/self.terminal_time, self.volume/self.initial_volume, bid_price_drift, mid_price_drift, spread, imbalance], dtype=np.float32)
         observation = np.concatenate([observation, market_order_imbalance, limit_order_imbalance, deltat_drift], dtype=np.float32)
         observation = np.concatenate([observation, order_dist], dtype=np.float32)
-        observation = np.concatenate([observation, bid_v, ask_v], dtype=np.float32)
-        # observation = np.concatenate([observation, filtered], dtype=np.float32)
+        observation = np.concatenate([observation, bid_volumes, ask_volumes], dtype=np.float32)
         observation = np.concatenate([observation, queue_positions], dtype=np.float32)
-
     
         return observation
     
-    def get_order_allocation(self, lob):
+    def get_order_allocation(self, lob, n_levels):
         """
             returns
-                - list of volumes: [v_1, v_2,... , v_n, v_>n], n=self.n_lob_levels
-                - list of order ids whose price is within [best_bid, best_bid+n]
+                - list of volumes: [v_1, v_2,... , v_n_levels, v_>n_levels], corresponfing to best_bid+1, best_bid+2, ..., best_bid+n_levels 
+                - set of order ids whose price is within [best_bid+1,..., best_bid+n_levels]
 
             input
                 - lob: current state of the order book
+                - number of levels, e.g n_levels = 3
                 
             TODO: this could be a function in the order book class
+            TODO: carry a separate dict in LOB which tracks orders of the agent, its position, and queue position 
         """
+
         best_bid = lob.get_best_price('bid')
-        # this loop counts how many orders are on each level, saves orders up to a certain level 
         volume_per_level = []
         orders_within_range = set()
-        for level in range(1, self.n_lob_levels+1):
+        for level in range(1, n_levels+1):
+            # 1,2,3, ..., n_levels
+            # e.g. if n_levels = 4, then 1,2,3,4
             orders_on_level = 0
             price = best_bid+level
             if price in lob.price_map['ask']:
                 for order_id in lob.price_map['ask'][price]:
-                    # TODO: can we make this more efficent. check for order location already when the order enters the book. 
-                    # carry a separate dict in LOB which tracks orders of the agent, its position, and queue position 
                     if lob.order_map[order_id].agent_id == self.agent_id:                                                
                         orders_on_level += lob.order_map[order_id].volume
                         orders_within_range.add(order_id)                    
                 volume_per_level.append(orders_on_level)
             else:
                 volume_per_level.append(0)
-        # append volumes on levels >=4
+        # append volumes which are on prices larger than bid + n_levels 
         assert sum(volume_per_level) <= self.active_volume
         volume_per_level.append(self.active_volume-sum(volume_per_level))
         assert sum(volume_per_level) <= self.volume
-        assert sum([v < 0 for v in volume_per_level]) == 0 
         assert sum(volume_per_level) == self.active_volume
+        assert sum([v < 0 for v in volume_per_level]) == 0 
         return volume_per_level, orders_within_range
 
     def new_event(self, time, event):
@@ -1021,8 +972,9 @@ class InitialAgent():
             self.initial_shape = np.array([initial_shape]*n_initial_levels) 
         else:
             shape = np.load(initial_shape_file)
-            self.initial_shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf)      
-            assert len(self.initial_shape) == self.n_inital_levels
+            shape = np.clip(np.rint(np.mean([shape['bidv'], shape['askv']], axis=0)), 1, np.inf) 
+            assert self.n_inital_levels <= len(shape), 'initial shape file does not have enough levels'
+            self.initial_shape = shape[:n_initial_levels]
         return None 
     
     def generate_order(self, lob, time):
