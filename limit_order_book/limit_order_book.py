@@ -239,6 +239,9 @@ class LimitOrderBook:
                 else:
                     self.data.limit_sell.append(order.volume)
                     self.data.limit_buy.append(0)
+            else:
+                self.data.limit_buy.append(0)
+                self.data.limit_sell.append(0)
                 
         else: 
             # update last element in lists
