@@ -40,14 +40,14 @@ noise_agent_config['cancel_mean'] = 0
 noise_agent_config['cancel_std'] = 2
 noise_agent_config['volume_min'] = 1
 noise_agent_config['volume_max'] = 20
-noise_agent_config['unit_volume'] = True
+noise_agent_config['unit_volume'] = False
 noise_agent_config['level'] = 30 
 noise_agent_config['fall_back_volume'] = None 
 # 
 noise_agent_config['initial_shape'] = None
 noise_agent_config['initial_shape_file'] = None 
 # imbalance related stuff 
-noise_agent_config['damping_factor'] = 0.75
+noise_agent_config['damping_factor'] = 0.65
 noise_agent_config['imbalance_reaction'] = False
 noise_agent_config['imbalance_factor'] = 2.0
 noise_agent_config['default_waiting_time'] = 1e-6
@@ -91,6 +91,8 @@ rl_agent_config['terminal_time'] = None
 rl_agent_config['start_time'] = 0
 rl_agent_config['time_delta'] = 500
 rl_agent_config['priority'] = 0
+rl_agent_config['action_book_levels'] = 4 
+rl_agent_config['observation_book_levels'] = 6
 
 # strategic
 strategic_agent_config = {}
