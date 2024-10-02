@@ -50,10 +50,11 @@ def evaluate(
 if __name__=="__main__":
     from simulation.market_gym import Market     
     # set up 
-    env = 'flow'
-    volume = 40
+    env = 'noise'
+    volume = 20
+    n_cpus = 128
     #
-    configs = [{'market_env': env, 'execution_agent': 'rl_agent', 'volume': volume, 'seed': 100+s} for s in range(70)]
+    configs = [{'market_env': env, 'execution_agent': 'rl_agent', 'volume': volume, 'seed': 100+s} for s in range(n_cpus)]
     env_fns = [lambda: Market(config) for config in configs]
     # model_path = "runs/Market__ppo_continuous_action__0__1725462757_gaussian_20lots_more_features/ppo_continuous_action.cleanrl_model"
     # model_path = "runs/Market__ppo_continuous_action__0__1725470471_20lots_std3/ppo_continuous_action.cleanrl_model"
@@ -69,14 +70,23 @@ if __name__=="__main__":
     # model_path = 'runs/Market__ppo_modified__0__1725902028_flow_40_noclip/ppo_modified.cleanrl_model'
     # model_path = 'runs/Market__ppo_modified__0__1725914125_flow_40_noclip/ppo_modified.cleanrl_model'
     # model path with queues 
-    model_path = 'runs/Market__ppo_continuous_action__0__1726753861_flow_40_with_queues/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1726753861_flow_40_with_queues/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs/Market__ppo_continuous_action__0__1726767202_strategic_40/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs_std4/Market__ppo_continuous_action__0__1726841027_flow_60/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs_std4/Market__ppo_continuous_action__0__1727359648_flow_60/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs_t200_std2/Market__ppo_continuous_action__0__1727729743_flow_60/ppo_continuous_action.cleanrl_model'
+    # model_path = 'runs_t200_std2/Market__actor_critic__0__1727807989_flow_60/actor_critic.cleanrl_model'
+    # model_path = 'runs_t150_std2/Market__actor_critic__0__1727814771_flow_60/actor_critic.cleanrl_model'
+    # model_path = 'runs_t150_std2/Market__actor_critic__0__1727855647_flow_20/actor_critic.cleanrl_model'
+    # model_path = 'runs_t150_std2/Market__actor_critic__0__1727867325_flow_20/actor_critic.cleanrl_model'
+    model_path = 'runs_t150_std2/Market__actor_critic__0__1727873682_noise_20/actor_critic.cleanrl_model'
 
 
     t = time.time()
     returns = evaluate(
         model_path=model_path,
         env_fns=env_fns,
-        eval_episodes=7000,
+        eval_episodes=4000,
         Model=Agent,
         # device="cpu",
     )
@@ -84,6 +94,6 @@ if __name__=="__main__":
     print(np.mean(returns))
     print(f"elapsed time: {time.time()-t}")
 
-    np.savez(f'raw_rewards/rewards_{env}_{volume}_rl_agent.npz', rewards=returns)
+    np.savez(f'raw_rewards/std3_t200_rewards_{env}_{volume}_rl_agent.npz', rewards=returns)
 
 
