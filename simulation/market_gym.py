@@ -29,8 +29,8 @@ class Market(gym.Env):
             - seed will be set depending on whether we use multiple workers or not 
         """
 
-        terminal_time = 200
-        time_delta = 20
+        terminal_time = 150
+        time_delta = 15
 
         assert 'market_env' in config
         assert 'execution_agent' in config
@@ -80,9 +80,9 @@ class Market(gym.Env):
         if config['market_env'] == 'strategic':       
             strategic_agent_config['terminal_time'] = terminal_time
             strategic_agent_config['start_time'] = -15     
-            strategic_agent_config['time_delta'] = 7.5
+            strategic_agent_config['time_delta'] = 3
             strategic_agent_config['market_volume'] = 1
-            strategic_agent_config['limit_volume'] = 1
+            strategic_agent_config['limit_volume'] = 2
             strategic_agent_config['rng'] = np.random.default_rng(seed)
             agent = StrategicAgent(**strategic_agent_config)
             self.agents[agent.agent_id] = agent 
@@ -344,11 +344,13 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
 if __name__ == '__main__':
 
     n_samples = 1000        
-    n_cpus = 70
+    n_cpus = 50
     seed = 100
+    envs = ['noise', 'flow', 'strategic']
+    envs = ['strategic']
 
-    for env in ['noise', 'flow']:
-        for lots in [30, 60]:
+    for env in envs:
+        for lots in [20, 60]:
             for agent in ['sl_agent', 'linear_sl_agent']:
                 print(f'env: {env}, lots: {lots}, agent: {agent}')
                 # start_time = time.time()
