@@ -42,7 +42,8 @@ class Market():
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
-        terminal_time = 200
+        terminal_time = 150
+        time_delta =15 
 
         # noise agent setting
         noise_agent_config['rng'] = np.random.default_rng(seed)
@@ -52,9 +53,10 @@ class Market():
         noise_agent_config['fall_back_volume'] = 5
         if market_env == 'noise':
             noise_agent_config['imbalance_reaction'] = False
-            noise_agent_config['initial_shape_file'] = 'initial_shape/noise_unit.npz'
+            noise_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_65.npz'
             agent = NoiseAgent(**noise_agent_config)
         else: 
+            noise_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_65.npz'
             noise_agent_config['imbalance_reaction'] = True
             noise_agent_config['imbalance_factor'] = 2.0
             noise_agent_config['damping_factor'] = 0.1
@@ -67,7 +69,7 @@ class Market():
         
         # strategic agent setting 
         if market_env == 'strategic':
-            strategic_agent_config['time_delta'] = 7.5
+            strategic_agent_config['time_delta'] = time_delta
             strategic_agent_config['market_volume'] = 1
             strategic_agent_config['limit_volume'] = 1
             strategic_agent_config['rng'] = np.random.default_rng(seed)
@@ -169,7 +171,7 @@ if __name__ == '__main__':
     # n_samples = 1000
     n_samples = 2000
     # n_cpus = 80
-    n_cpus = 70
+    n_cpus = 128
     results = {f'n_events': [],'drift_mean': [], 'drift_std': [], 'trades': [], 'trades_std': [], 'buy_orders': [], 'sell_orders': []} 
     data_drifts = {}
     data_for_trade_plot = {}
@@ -207,7 +209,7 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.xlim(-4, 4)
     # plt.tight_layout()
-    plt.savefig('plots/mid_price_drift_std3_200.pdf')
+    plt.savefig('plots/mid_price_drift_std2_150.pdf')
     plt.figure(figsize=(10, 6))
 
 
@@ -221,4 +223,4 @@ if __name__ == '__main__':
     plt.title('Number of Trades', fontsize=16)
     plt.ylabel('Frequency')
     # plt.tight_layout()
-    plt.savefig('plots/kde_trades_std3_200.pdf')
+    plt.savefig('plots/kde_trades_std2_150.pdf')
