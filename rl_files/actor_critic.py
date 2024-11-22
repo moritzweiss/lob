@@ -1,4 +1,3 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
 import os
 import random
 import time
@@ -12,6 +11,7 @@ import tyro
 from torch.distributions.normal import Normal
 from torch.distributions.dirichlet import Dirichlet
 from torch.utils.tensorboard import SummaryWriter
+# sys path hacks 
 import sys 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -29,33 +29,30 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
-    """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "cleanRL"
-    """the wandb's project name"""
     wandb_entity: str = None
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_model: bool = True
-    """whether to save model into the `runs_std4/{run_name}` folder"""
-    upload_model: bool = False
-    """whether to upload the saved model to huggingface"""
-    hf_entity: str = ""
-    """the user or org name of the model repository from the Hugging Face Hub"""
+    """whether to save model """
+    run_directory: str = 'run'
+    """directory for saving models"""
 
     # Algorithm specific arguments
-    # env_id: str = "HalfCheetah-v4"
-    env_id: str = "Market"
+    env_type: str = "noise"
     """the id of the environment"""
-    total_timesteps: int = 200*128*100
+    num_lots: int = 20
+    """the number of lots"""
+    # total_timesteps: int = 200*128*100
+    # total_timesteps: int = 100*128*100
+    total_timesteps: int = 2*100
+    # total_timesteps: int = 1*128*100
     """total timesteps of the experiments"""
     learning_rate: float = 1e-2
     """the learning rate of the optimizer"""
-    num_envs: int = 128
+    # num_envs: int = 128
+    num_envs: int = 1 
     """the number of parallel game environments"""
-    # less bootstraping --> user more steps per environment 
     num_steps: int = 100
+    # less value bootstraping --> user more steps per environment 
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -77,10 +74,6 @@ class Args:
     """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
-    max_grad_norm: float = 100
-    """the maximum norm for the gradient clipping"""
-    target_kl: float = None
-    """the target KL divergence threshold"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -89,7 +82,6 @@ class Args:
     """the mini-batch size (computed in runtime)"""
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
-
 
 def make_env(config):
     def thunk():
@@ -139,38 +131,119 @@ class Agent(nn.Module):
         # entropy is summed for each component of the action
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
+class AgentSoftmax(nn.Module):
+    def __init__(self, envs):
+        n_hidden_units = 128 
+        super().__init__()
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
+        )
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)-1), std=1e-5),
+        )
+        # custom bias in the last layer 
+        x = -1.0*torch.ones(np.prod(envs.single_action_space.shape)-1)
+        x[-1] = 1.0
+        self.actor_mean[-1].bias.data.copy_(x)
+        # setting log standard deviations 
+        # self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)-1), requires_grad=True)
+        self.variance = 1.0 
+
+    def get_value(self, x):
+        return self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        action_mean = self.actor_mean(x)        
+        # action_logstd = self.actor_logstd.expand_as(action_mean)
+        # std either as a learnable parameter or as a hyper parameter 
+        # action_std = torch.exp(action_logstd)
+        action_std = torch.ones_like(action_mean)*self.variance
+        probs = Normal(action_mean, action_std)
+        with torch.no_grad():
+            if action is None:
+                # sample base action, then apply logistic transformation, a = h(v)
+                base_action = probs.sample()
+                z = 1 + torch.sum(torch.exp(base_action), dim=1, keepdim=True)
+                action = torch.exp(base_action)/z
+                action = torch.cat((action, 1/z), dim=1)
+            else:
+                # use inverse logistic transform to get the base action v = h^{-1}(a)
+                last_component = action[:,-1].reshape(-1,1)
+                base_action = torch.log(action[:,:-1]/last_component)
+        return action, probs.log_prob(base_action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+class DirichletAgent(nn.Module):
+    def __init__(self, envs):         
+        n_hidden_units = 128
+        super().__init__()
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
+        )    
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
+            nn.Tanh(),
+            # the last term scales the weights ! 
+            layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)), std=1e-5, bias_const=np.log(np.exp(1)-1)),
+        )
+        self.actor_var_scale = nn.Parameter(torch.tensor(-1.0), requires_grad=True)
+        # self.actor_var_scale = 1e-1
+    
+    def get_action_and_value(self, state, action=None): 
+        mean = torch.nn.functional.softplus(self.actor_mean(state))  
+        scale = torch.nn.functional.softplus(self.actor_var_scale) + 1e-5
+        # scale = 1e-5
+        if torch.isnan(state).any():
+            print("State contains NaN", state)
+        if torch.isnan(mean).any():
+            print("Mean contains Nan, state is ", mean)
+        # if torch.isnan(scale).any():
+        #     print("Scale contains NaNs:", scale)
+        # scale =x 1e-5
+        concentrations = mean*scale 
+        # concentrations = mean
+        # concentrations = mean*sclae
+        # probs = Dirichlet(mean)
+        probs = Dirichlet(concentrations)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.variance, self.critic(state)
+
+    def get_value(self, state):
+        return self.critic(state)
+    
 
 if __name__ == "__main__":
-    ###
-    volume = 60
-    market_env = 'noise'
-    print(f'volume={volume}, market_env={market_env}')
-    ###
     args = tyro.cli(Args)
+    print('starting the training process')
+    print(f'environment set up: volume={args.num_lots}, market_env={args.env_type}')
+    
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}_{market_env}_{volume}"
-    if args.track:
-        import wandb
+    print(f'batch things: batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
+    run_name = f"{args.env_type}__{args.exp_name}__{args.seed}__{int(time.time())}_{args.env_type}_{args.num_lots}_logistic_softmax"
 
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
-    writer = SummaryWriter(f"runs_t150_std2/{run_name}")
+    writer = SummaryWriter(f"{args.run_directory}/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # TRY NOT TO MODIFY: seeding
+    # seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -178,14 +251,16 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
-    configs = [{'market_env': market_env, 'execution_agent': 'rl_agent', 'volume': volume, 'seed': args.seed+s} for s in range(args.num_envs)]
+    # environment setup
+    configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.seed+s} for s in range(args.num_envs)]
     env_fns = [make_env(config) for config in configs]
     envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
     observation, info = envs.reset(seed=args.seed)
 
-    agent = Agent(envs).to(device)
+    # agent set up 
+    agent = AgentSoftmax(envs).to(device)
+    print(f'the agent is: {agent}')
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -196,7 +271,7 @@ if __name__ == "__main__":
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
-    # TRY NOT TO MODIFY: start the game´
+    # start the simulation 
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
@@ -213,6 +288,10 @@ if __name__ == "__main__":
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
             print(lrnow)
+        
+        # manual variance scaling 
+        agent.variance = 1 - iteration/(args.num_iterations+1) + 1e-1 
+        print(f'variance is {agent.variance}')
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
@@ -235,7 +314,7 @@ if __name__ == "__main__":
             if "final_info" in infos:
                 for info in infos["final_info"]:
                     if info is not None:
-                        returns.append(info['cum_reward'])
+                        returns.append(info['reward'])
                         times.append(info['time'])
                         drifts.append(info['drift'])
         
@@ -244,7 +323,6 @@ if __name__ == "__main__":
         writer.add_scalar("charts/drift", np.mean(drifts), global_step)
         print(f'iteration={iteration}')
             
-
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
@@ -284,12 +362,6 @@ if __name__ == "__main__":
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
-                with torch.no_grad():
-                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                    old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
-
                 mb_advantages = b_advantages[mb_inds]
                 if args.norm_adv:
                     mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
@@ -297,9 +369,6 @@ if __name__ == "__main__":
                 # Policy loss modified 
                 pg_loss = -mb_advantages * newlogprob
                 pg_loss = pg_loss.mean()
-                # pg_loss1 = -mb_advantages * ratio
-                # pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                # pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 # Value loss
                 newvalue = newvalue.view(-1)
@@ -316,26 +385,16 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                # not sure if it makes sense to take the mean here 
-                # entropy should always be the same for each worker (or compment of the batch) (idx, action1, action2, action3)
-                # entropy only depends on the current standard deviation 
-                # instead of mean, could just take the first component of the entropy tensor
-                entropy_loss = entropy.mean()
                 # does args.vf_coef need to be tuned ? 
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                # could add entropy loss here 
+                entropy_loss = entropy.mean()
+                loss = pg_loss  + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()
-                # no grad norm clipping 
-                # nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
 
-            if args.target_kl is not None and approx_kl > args.target_kl:
-                break
         
-        # print('concentrations')
-        # print(agent.concentrations_params)
-
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -344,40 +403,18 @@ if __name__ == "__main__":
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        writer.add_scalar("losses/total_loss", loss, global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        writer.add_scalar("values/variance", agent.variance, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if args.save_model:
-        model_path = f"runs_t150_std2/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"{args.run_directory}/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
 
-        # from cleanrl.cleanrl_utils.evals.ppo_eval import evaluate
-        # episodic_returns = evaluate(
-        #     model_path,
-        #     make_env,
-        #     args.env_id,
-        #     eval_episodes=10,
-        #     run_name=f"{run_name}-eval",
-        #     Model=Agent,
-        #     device=device,
-        #     gamma=args.gamma,
-        # )
-
-        # for idx, episodic_return in enumerate(episodic_returns):
-        #     writer.add_scalar("eval/episodic_return", episodic_return, idx)
-
-        # if args.upload_model:
-        #     from cleanrl_utils.huggingface import push_to_hub
-
-        #     repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-        #     repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-        #     push_to_hub(args, episodic_returns, repo_id, "PPO", f"runs/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()
