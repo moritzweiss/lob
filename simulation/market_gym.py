@@ -25,8 +25,6 @@ class Market(gym.Env):
 
         """
             - config should have keys market_env, execution_agent, volume, seed
-            - we use a config, becuase this is required by rl lib 
-            - seed will be set depending on whether we use multiple workers or not 
         """
 
         terminal_time = 150
@@ -36,6 +34,8 @@ class Market(gym.Env):
         assert 'execution_agent' in config
         assert 'volume' in config
         assert 'seed' in config
+        assert 'terminal_time' in config 
+        assert 'time_delta' in config 
 
         seed = config['seed']
         
@@ -49,7 +49,6 @@ class Market(gym.Env):
             initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_65.npz'
         else:
             initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_65.npz'
-            # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_flow_75.npz'
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
@@ -65,6 +64,7 @@ class Market(gym.Env):
             noise_agent_config['imbalance_reaction'] = False
             agent = NoiseAgent(**noise_agent_config)
             self.agents[agent.agent_id] = agent
+
         # flow 
         else: 
             noise_agent_config['imbalance_reaction'] = True
@@ -126,7 +126,6 @@ class Market(gym.Env):
             self.agents[agent.agent_id] = agent
         else:
             # this is just dummy observation space, to make vectorized environments work for benchmark agents 
-            # this is a bit clumsy 
             self.observation_space = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
             self.action_space = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
@@ -204,7 +203,7 @@ class Market(gym.Env):
         # TODO: only record final info to increase speed 
         mid_price = (self.lob.data.best_bid_prices[-1] + self.lob.data.best_ask_prices[-1])/2
         initial_mid_price = (self.agents['initial_agent'].initial_ask + self.agents['initial_agent'].initial_bid)/2
-        info = {'cum_reward': self.agents[self.execution_agent_id].cummulative_reward, 
+        info = {'reward': self.agents[self.execution_agent_id].cummulative_reward, 
                 'passive_fill_rate': self.agents[self.execution_agent_id].limit_sells/self.agents[self.execution_agent_id].initial_volume,                
                 'time': t,
                 'drift': mid_price - initial_mid_price,
@@ -258,7 +257,7 @@ def rollout_vectorized_rl(n_episodes, env_fns,
         if "final_info" in infos:
             for info in infos["final_info"]:
                 if info is not None:
-                    rewards.append(info['cum_reward'])
+                    rewards.append(info['reward'])
     return rewards
 
 def rollout_vectorized_benchmarks(seed, n_episodes, n_envs, execution_agent, market_type, volume): 
@@ -280,7 +279,7 @@ def rollout_vectorized_benchmarks(seed, n_episodes, n_envs, execution_agent, mar
     n_events = []
     for _ in range(samples_per_env):
         _, info = M.reset()
-        total_rewards.extend(list(info['cum_reward']))
+        total_rewards.extend(list(info['reward']))
         times.append(list(info['time']))
         n_events.append(list(info['n_events']))
     return total_rewards, times, n_events
@@ -319,7 +318,7 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume):
                 # print(f'queues: {observation[1]}')
                 # print(observation)
         # print(info)
-        total_rewards.append(info['cum_reward'])
+        total_rewards.append(info['reward'])
         times.append(info['time'])
         n_events.append(info['n_events'])        
     return total_rewards, times, n_events
@@ -343,23 +342,26 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
 
 if __name__ == '__main__':
 
-    n_samples = 1000        
-    n_cpus = 50
+    saving_directory = 'rewards'
+    n_samples = 500
+    n_cpus = 100
     seed = 100
     envs = ['noise', 'flow', 'strategic']
-    envs = ['strategic']
+    # envs = ['strategic']
+    n_lots = [20, 60]
+    # 
+    
 
     for env in envs:
-        for lots in [20, 60]:
+        for lots in n_lots:
             for agent in ['sl_agent', 'linear_sl_agent']:
                 print(f'env: {env}, lots: {lots}, agent: {agent}')
-                # start_time = time.time()
+                start_time = time.time()
                 rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed)
-                np.savez(f'raw_rewards/std3_t200_rewards_{env}_{lots}_{agent}.npz', rewards=rewards)
+                np.savez(f'rewards/{env}_{lots}_{agent}.npz', rewards=rewards)
                 end_time = time.time()
-                # execution_time = end_time - start_time
-                # print("Execution time:", execution_time)
-                # print(rewards)
+                execution_time = end_time - start_time
+                print("Execution time:", execution_time)
                 print(f'mean rewards: {np.mean(rewards)}')
                 print(f'length of rewards: {len(rewards)}')
     
