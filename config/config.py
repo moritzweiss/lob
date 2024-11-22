@@ -24,12 +24,12 @@ noise_agent_config = {}
 # generated smaller queues than the base config 
 # volumes are half normal with mean 1 and sigma 3, they are clipped by 1, 20
 # the reasoning for the sigma is that events that eat into more levels of the book than the first two levels are unlikely 
-# note: in the new set up, we might not a sigma that is so high 
-# still need to investigate this 
+
 # intensities
 noise_agent_config['market_intensity'] = market_intensity
 noise_agent_config['limit_intensities'] = limit_intensities
 noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
+
 # volume related things 
 noise_agent_config['volume_distribution'] = 'half_normal'
 noise_agent_config['market_mean'] = 0
@@ -43,6 +43,7 @@ noise_agent_config['volume_max'] = 20
 noise_agent_config['unit_volume'] = False
 noise_agent_config['level'] = 30 
 noise_agent_config['fall_back_volume'] = None 
+
 # 
 noise_agent_config['initial_shape'] = None
 noise_agent_config['initial_shape_file'] = None 
