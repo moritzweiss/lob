@@ -76,7 +76,7 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 0.5
+    clip_coef: float = 0.1
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
@@ -223,8 +223,8 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     ###
-    volume = 60
-    market_env = 'flow'
+    volume = 20
+    market_env = 'noise'
     ###
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
