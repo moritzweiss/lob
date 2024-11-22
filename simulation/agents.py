@@ -688,7 +688,9 @@ class RLAgent(ExecutionAgent):
 
         if time >= self.start_time and time < self.terminal_time:            
             # normalize action such that its part of the simplex 
-            action = np.exp(action)/np.sum(np.exp(action), axis=0)
+            # action = np.exp(action)/np.sum(np.exp(action), axis=0)
+            assert np.all(action >= 0), 'all action values must be >= 0'
+            assert np.abs(np.sum(action)-1) < 1e-6, 'action must sum to 1'
             best_bid = lob.get_best_price('bid')
             
             # target volumes: 
