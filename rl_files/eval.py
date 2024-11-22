@@ -8,7 +8,8 @@
 from typing import Callable, List 
 import gymnasium as gym
 import torch
-from ppo_continuous_action import Agent 
+# from ppo_continuous_action import Agent, AgentDirichlet
+from actor_critic import AgentSoftmax, DirichletAgent
 # from ppo_modified import Agent
 import numpy as np
 import time 
@@ -50,9 +51,9 @@ def evaluate(
 if __name__=="__main__":
     from simulation.market_gym import Market     
     # set up 
-    env = 'noise'
-    volume = 20
-    n_cpus = 128
+    env = 'flow'
+    volume = 60
+    n_cpus = 1
     #
     configs = [{'market_env': env, 'execution_agent': 'rl_agent', 'volume': volume, 'seed': 100+s} for s in range(n_cpus)]
     env_fns = [lambda: Market(config) for config in configs]
@@ -79,21 +80,27 @@ if __name__=="__main__":
     # model_path = 'runs_t150_std2/Market__actor_critic__0__1727814771_flow_60/actor_critic.cleanrl_model'
     # model_path = 'runs_t150_std2/Market__actor_critic__0__1727855647_flow_20/actor_critic.cleanrl_model'
     # model_path = 'runs_t150_std2/Market__actor_critic__0__1727867325_flow_20/actor_critic.cleanrl_model'
-    model_path = 'runs_t150_std2/Market__actor_critic__0__1727873682_noise_20/actor_critic.cleanrl_model'
+    # model_path = 'runs_t150_std2/Market__actor_critic__0__1727873682_noise_20/actor_critic.cleanrl_model'
+    # flow 60 dirichlet 
 
+    # model_path = 'runs_t150_std2/Market__actor_critic__0__1728480261_flow_60_dirichlet/actor_critic.cleanrl_model'
+
+    model_path = 'runs_t150/Market__actor_critic__0__1729712129_flow_60_logistic_normal_learnable_variance/actor_critic.cleanrl_model'
 
     t = time.time()
     returns = evaluate(
         model_path=model_path,
         env_fns=env_fns,
         eval_episodes=4000,
-        Model=Agent,
+        Model=AgentSoftmax,
         # device="cpu",
     )
     
     print(np.mean(returns))
     print(f"elapsed time: {time.time()-t}")
 
-    np.savez(f'raw_rewards/std3_t200_rewards_{env}_{volume}_rl_agent.npz', rewards=returns)
+    file_name = f'raw_rewards/std3_t200_rewards_{env}_{volume}_rl_agent_dirichlet.npz'
+    print(f'save to {file_name}')
+    np.savez(file_name, rewards=returns)
 
 
