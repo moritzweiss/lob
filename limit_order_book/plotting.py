@@ -14,7 +14,7 @@ import pandas as pd
 # TODO: Wrap all the data into one data frame 
 
 
-def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1000):
+def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1000, xlim=[0,150], ylim=[995,1005], width=6.75, height=9):
     '''
     inputs:
         - trades: data frame with columns ['type', 'side', 'size', 'price']
@@ -54,35 +54,42 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     # hard coded. find better logic for this. 
     # max_volume = 1000
 
-    plt.figure(figsize=(10, 6))
+    # width, height 
+    plt.figure(figsize=(width, height), dpi=300)
 
-    plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-max_volume, vmax=max_volume, label='_nolegend_')
+    plt.scatter(extended_time, prices, c=volumes, cmap=cm.bwr, vmin=-max_volume, vmax=max_volume, s=150, label='_nolegend_')
+    # plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-max_volume, vmax=max_volume, s=150, label='_nolegend_', alpha=1.0)
 
-    plt.plot(time, level2.best_bid_price, '-', color='black', linewidth=3)
-    plt.plot(time, level2.best_ask_price, '-', color='black', linewidth=3)
+    plt.plot(time, level2.best_bid_price, '-', color='black', linewidth=5, label='_nolegend_')
+    plt.plot(time, level2.best_ask_price, '-', color='black', linewidth=5, label='Best bid/ask prices')
     cbar = plt.colorbar()
-    cbar.set_label('Volume', rotation=270, labelpad=15, fontsize=16)
+    cbar.set_label('Volume', rotation=270, labelpad=15, fontsize=22)
 
     M = trades[['buy', 'sell']].max().max()
-    plt.scatter(trades[trades.buy>0].time.values, level2.best_ask_price[trades.buy>0], color='black', marker='^', s= (scale/M)*trades[trades.buy>0].buy.values) 
-    plt.scatter(trades[trades.sell>0].time.values, level2.best_bid_price[trades.sell>0], color='black', marker='v', s= (scale/M)*trades[trades.sell>0].sell.values)
+    plt.scatter(trades[trades.buy>0].time.values, level2.best_ask_price[trades.buy>0], color='black', marker='^', s= (scale/M)*trades[trades.buy>0].buy.values, label='Market buy') 
+    plt.scatter(trades[trades.sell>0].time.values, level2.best_bid_price[trades.sell>0], color='black', marker='v', s= (scale/M)*trades[trades.sell>0].sell.values, label='Market sell')
     
-    plt.xlim(time[0],time[-1])
-    plt.ylim(995,1005)
+    plt.xlim(xlim[0], 150)
+    plt.ylim(994.5,1003.5)
+    plt.xticks(np.arange(0, 151, step=15))
+
+
     
     # handles, labels = plt.gca().get_legend_handles_labels()
     # Set x and y tick size
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    plt.xlabel('Time', fontsize=16)
-    plt.ylabel('Price', fontsize=16)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.xlabel('Time', fontsize=22)
+    plt.ylabel('Price', fontsize=22)
     
 
-    lg = plt.legend(['best bid price', 'best ask price', 'market buy', 'market sell'], prop={'size': 10}, loc='upper left')
+    # lg = plt.legend(['best ask price', 'best bid price', 'market buy', 'market sell'], prop={'size': 12}, loc='upper left')
+    lg = plt.legend(prop={'size': 16}, loc='upper left')
     # print(lg.legendHandles[2]._sizes)
     # print(lg.legendHandles[0]._sizes)
-    lg.legendHandles[2]._sizes = [100]
-    lg.legendHandles[3]._sizes = [100]
+    lg.legendHandles[2]._sizes = [150]
+    lg.legendHandles[1]._sizes = [150]
+    # lg.legendHandles[3]._sizes = [150]
     
 
     return None  
@@ -110,18 +117,28 @@ def plot_average_book_shape(bid_volumes, ask_volumes, ax, level=3, symetric=Fals
     else:
         ax.bar(range(0,-level,-1), book_shape_bid, color='blue', label='bid')
         ax.bar(range(1,level+1,1), book_shape_ask, color='red', label='ask')
-    # ax.legend(loc='upper right', prop={'size': 18})
-    ax.legend(loc='upper right')
+    # ax.legend(loc='upper right')
+    ax.legend(loc='upper right', prop={'size': 16})
     # ax.set_xlabel('relative distance to mid price')
     # ax.set_xlabel('relative distance to mid price', fontsize=18)
-    ax.set_ylabel('volume')
-    # ax.set_ylabel('average volume', fontsize=18)
-    # ax.tick_params(axis='x', labelsize=14)
-    # ax.tick_params(axis='y', labelsize=14)
-    ax.set_xlim(-level-1,level+1)
     ax.set_yticks(range(0, 26, 5))
-    ax.set_xticks(range(-level, level+1, 10))
-    ax.set_title(title)
+    ax.set_ylabel('Volume', fontsize=16)
+    ax.set_xlabel('Ticks', fontsize=16)
+    ax.tick_params(axis='x', labelsize=14)
+    ax.tick_params(axis='y', labelsize=14)
+    ax.set_xlim(-level-1,level+1)
+    # ticks at 1,10,..,level
+    upper_xticks = list(range(0,level+1, 10))
+    upper_xticks[0] = 1
+    # ticks at 0, -9,..,-level+1
+    lower_xticks = list(range(1,-level, -10))[1:]
+    xticks = lower_xticks + upper_xticks
+    ax.set_xticks(xticks)
+    lower_label = list(range(-10,-level-1,-10))
+    # label2[0] = 1 
+    # xtick_labels = label1 + label2
+    ax.set_xticklabels(lower_label + upper_xticks)
+    # ax.set_title(title)
     ax.set_ylim(0, 25)
     # ax.set_title(title, fontsize=18)
     # ax.set_title(title, fontsize=18)
