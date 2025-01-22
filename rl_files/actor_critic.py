@@ -25,6 +25,8 @@ class Args:
     """the name of this experiment"""
     seed: int = 0
     """seed of the experiment"""
+    eval_seed: int = 100
+    """seed for evaluation"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False"""
     cuda: bool = True
@@ -33,23 +35,32 @@ class Args:
     """the entity (team) of wandb's project"""
     save_model: bool = True
     """whether to save model """
-    run_directory: str = 'run'
+    evaluate: bool = True
+    """whether to evaluate the model"""
+    n_evalutation_episodes: int = int(1e4)
+    """the number of episodes to evaluate the model"""
+    run_directory: str = 'runs'
     """directory for saving models"""
 
     # Algorithm specific arguments
+    # noise, flow, strategic 
     env_type: str = "noise"
     """the id of the environment"""
     num_lots: int = 20
     """the number of lots"""
+    terminal_time: int = 150
+    """the terminal time for the execution agent"""
+    time_delta: int = 15
+    """the time delta for the execution agent"""
     # total_timesteps: int = 200*128*100
     # total_timesteps: int = 100*128*100
-    total_timesteps: int = 2*100
-    # total_timesteps: int = 1*128*100
+    # total_timesteps: int = 2*100
+    total_timesteps: int = 100*128*100
     """total timesteps of the experiments"""
     learning_rate: float = 1e-2
     """the learning rate of the optimizer"""
-    # num_envs: int = 128
-    num_envs: int = 1 
+    num_envs: int = 128
+    # num_envs: int = 1 
     """the number of parallel game environments"""
     num_steps: int = 100
     # less value bootstraping --> user more steps per environment 
@@ -111,10 +122,6 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)), std=0.01),
         )
-        # changed to reqires_grad=False
-        # setting requires_grad=True yields better results: HOW IS THIS UPDATED ? 
-        # i guess the parameters are not state dependent, but are updated as we go along
-        # this must be the case otherwise entropy would not decreae gradually
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)), requires_grad=True)
 
     def get_value(self, x):
@@ -234,8 +241,9 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    print(f'batch things: batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
-    run_name = f"{args.env_type}__{args.exp_name}__{args.seed}__{int(time.time())}_{args.env_type}_{args.num_lots}_logistic_softmax"
+    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
+    run_name = f"{args.exp_name}_{args.env_type}_{args.num_lots}_seed_{args.seed}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}"
+    print(f'the run name is: {run_name}')
 
     writer = SummaryWriter(f"{args.run_directory}/{run_name}")
     writer.add_text(
@@ -249,10 +257,22 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    # device = torch.device("cuda:1" if torch.cuda.is_available() and args.cuda else "cpu")
+    num_gpus = torch.cuda.device_count()
+    print(f"Number of GPUs available: {num_gpus}")
+    if num_gpus > 0:
+        # Choose the last GPU
+        last_gpu = num_gpus - 1
+        device = torch.device(f"cuda:{last_gpu}")
+        print(f"Using GPU: {torch.cuda.get_device_name(last_gpu)} (cuda:{last_gpu})")
+    else:
+        # Fall back to CPU if no GPU is available
+        device = torch.device("cpu")
+        print("No GPU available, using CPU.")
+
 
     # environment setup
-    configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.seed+s} for s in range(args.num_envs)]
+    configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.seed+s, 'terminal_time': 150, 'time_delta': 15} for s in range(args.num_envs)]
     env_fns = [make_env(config) for config in configs]
     envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -287,11 +307,11 @@ if __name__ == "__main__":
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
-            print(lrnow)
+            print(f' the lerning rate is {lrnow}')
         
         # manual variance scaling 
-        agent.variance = 1 - iteration/(args.num_iterations+1) + 1e-1 
-        print(f'variance is {agent.variance}')
+        agent.variance = 1 - iteration/(args.num_iterations+1) + 1e-2 
+        print(f'the current variance is {agent.variance}')
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
@@ -411,10 +431,36 @@ if __name__ == "__main__":
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if args.save_model:
-        model_path = f"{args.run_directory}/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"{parent_dir}/{args.run_directory}/{run_name}/{args.exp_name}"        
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
-
+    
+    if args.evaluate:
+        # recreate the environment 
+        configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.eval_seed+s, 'terminal_time': args.terminal_time, 'time_delta': args.time_delta} for s in range(args.num_envs)]
+        print('evalutation config:')
+        print(configs[0])
+        env_fns = [make_env(config) for config in configs]
+        envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
+        print('evalutation environment is created')
+        obs, _ = envs.reset()
+        episodic_returns = []
+        start_time = time.time()
+        while len(episodic_returns) < args.n_evalutation_episodes:
+            with torch.no_grad():
+                actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
+                next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
+            if "final_info" in infos:
+                for info in infos["final_info"]:
+                    if info is not None:
+                        episodic_returns.append(info['reward'])
+            obs = next_obs
+        print(f'evaluation time: {time.time()-start_time}')
+        print(f'reward length: {len(episodic_returns)}')
+        rewards = np.array(episodic_returns)        
+        file_name = f"{parent_dir}/rewards/{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}.npz"
+        np.savez(file_name, rewards=rewards)
+        print(f'saved rewards to {file_name}')
 
     envs.close()
     writer.close()
