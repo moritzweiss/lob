@@ -27,15 +27,12 @@ class Market(gym.Env):
             - config should have keys market_env, execution_agent, volume, seed
         """
 
-        terminal_time = 150
-        time_delta = 15
-
         assert 'market_env' in config
         assert 'execution_agent' in config
         assert 'volume' in config
         assert 'seed' in config
         assert 'terminal_time' in config 
-        assert 'time_delta' in config 
+        assert 'time_delta' in config         
 
         seed = config['seed']
         
@@ -49,15 +46,15 @@ class Market(gym.Env):
             initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_65.npz'
         else:
             initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_65.npz'
+        initial_agent_config['start_time'] = -config['time_delta']
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
 
-        # noise agent 
+        # set up the noise agent 
         noise_agent_config['rng'] = np.random.default_rng(seed)
         noise_agent_config['unit_volume'] = False
-        noise_agent_config['terminal_time'] = terminal_time
-        noise_agent_config['start_time'] = 0 
-        noise_agent_config['fall_back_volume'] = 5
+        noise_agent_config['terminal_time'] = config['terminal_time']
+        noise_agent_config['start_time'] = -config['time_delta']
 
         # noise 
         if config['market_env'] == 'noise':
@@ -78,9 +75,9 @@ class Market(gym.Env):
 
         # strategic agent 
         if config['market_env'] == 'strategic':       
-            strategic_agent_config['terminal_time'] = terminal_time
-            strategic_agent_config['start_time'] = -15     
-            strategic_agent_config['time_delta'] = 3
+            strategic_agent_config['terminal_time'] = config['terminal_time']
+            strategic_agent_config['start_time'] = -config['time_delta']     
+            strategic_agent_config['time_delta'] = 3 # time delta for strategic agent has lower frequency 
             strategic_agent_config['market_volume'] = 1
             strategic_agent_config['limit_volume'] = 2
             strategic_agent_config['rng'] = np.random.default_rng(seed)
@@ -88,8 +85,8 @@ class Market(gym.Env):
             self.agents[agent.agent_id] = agent 
             # adjust start time for noise agent 
             # start simulation at t=-15
-            self.agents['noise_agent'].start_time = -15
-            self.agents['initial_agent'].start_time = -15
+            self.agents['noise_agent'].start_time = -config['time_delta']
+            self.agents['initial_agent'].start_time = -config['time_delta']
 
 
         # execution agent
@@ -100,19 +97,23 @@ class Market(gym.Env):
         elif config['execution_agent'] == 'sl_agent':
             sl_agent_config['start_time'] = 0
             sl_agent_config['volume'] = config['volume']
-            sl_agent_config['terminal_time'] = terminal_time
+            sl_agent_config['terminal_time'] = config['terminal_time']
             agent = SubmitAndLeaveAgent(**sl_agent_config)
         elif config['execution_agent'] == 'linear_sl_agent': 
             linear_sl_agent_config['start_time'] = 0
             linear_sl_agent_config['volume'] = config['volume']
-            linear_sl_agent_config['terminal_time'] = terminal_time
-            linear_sl_agent_config['time_delta'] = time_delta
+            linear_sl_agent_config['terminal_time'] = config['terminal_time']
+            linear_sl_agent_config['time_delta'] = config['time_delta']
             agent = LinearSubmitLeaveAgent(**linear_sl_agent_config)
         else:
             rl_agent_config['start_time'] = 0
-            rl_agent_config['terminal_time'] = terminal_time
-            rl_agent_config['time_delta'] = time_delta
+            rl_agent_config['terminal_time'] = config['terminal_time']
+            rl_agent_config['time_delta'] = config['time_delta']
             rl_agent_config['volume'] = config['volume']
+            if config['market_env'] == 'noise':
+                rl_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_65.npz'
+            else:
+                rl_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_65.npz'
             agent = RLAgent(**rl_agent_config)
 
         self.agents[agent.agent_id] = agent
@@ -284,14 +285,14 @@ def rollout_vectorized_benchmarks(seed, n_episodes, n_envs, execution_agent, mar
         n_events.append(list(info['n_events']))
     return total_rewards, times, n_events
 
-def rollout(seed, n_episodes, execution_agent, market_type, volume):
+def rollout(seed, n_episodes, execution_agent, market_type, volume, terminal_time, time_delta):
     """
         - rolls out the environment for n_episodes
         - returns the total rewards, times, and number of events
         - if execution_agent is rl_agent we generate some action and step through the environment 
         - otherwise, we just reset and the environment runs to the end without any intermediate action 
     """
-    config = {'seed': seed, 'market_env': market_type, 'execution_agent': execution_agent, 'volume': volume}
+    config = {'seed': seed, 'market_env': market_type, 'execution_agent': execution_agent, 'volume': volume, 'terminal_time': terminal_time, 'time_delta': time_delta}
     M = Market(config)
     total_rewards = []
     times = []
@@ -306,7 +307,8 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume):
             terminated = False
             while not terminated:
                 # action = np.array([-10, 10, -10, -10, -10], dtype=np.float32)
-                action = np.array([-10, -10, 10, -10, -10, -10], dtype=np.float32)
+                # action = np.array([-10, -10, 10, -10, -10, -10], dtype=np.float32)
+                action = np.array([0,0,1,0,0,0], dtype=np.float32)
                 # action = np.array([-10, -10, -10, -10, 10], dtype=np.float32)
                 # action = np.random.dirichlet(np.ones(M.action_space.shape[0]))
                 # action = np.array([0, 1, 0, 0, 0], dtype=np.float32)
@@ -323,7 +325,7 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume):
         n_events.append(info['n_events'])        
     return total_rewards, times, n_events
 
-def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
+def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed, terminal_time, time_delta):
     """
         - is slightly faster than a vectorized rollout 
         - this runs rollout for each cpu     
@@ -333,7 +335,7 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
     samples_per_env = int(n_samples/n_cpus) 
     with Pool(n_cpus) as p:
         # seed+1, in order to match worker_index
-        out = p.starmap(rollout, [(seed+s, samples_per_env, execution_agent, market_type, volume) for s in range(n_cpus)])    
+        out = p.starmap(rollout, [(seed+s, samples_per_env, execution_agent, market_type, volume, terminal_time, time_delta) for s in range(n_cpus)])    
     all_rewards, times, n_events  = zip(*out)
     all_rewards = list(itertools.chain.from_iterable(all_rewards))
     times = list(itertools.chain.from_iterable(times))
@@ -341,48 +343,48 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed):
     return all_rewards, times, n_events
 
 if __name__ == '__main__':
-
-    saving_directory = 'rewards'
-    n_samples = 500
-    n_cpus = 100
-    seed = 100
-    envs = ['noise', 'flow', 'strategic']
-    # envs = ['strategic']
-    n_lots = [20, 60]
-    # 
     
+    #### run full parallel benchmark rollouts
+    # saving_directory = 'rewards'
+    # n_samples = 10000
+    # # n_samples = 5000
+    # n_cpus = 100
+    # seed = 100
+    # envs = ['noise', 'flow', 'strategic']
+    # # envs = ['strategic']
+    # n_lots = [20, 60]
+    # # n_lots = [10, 60]    
 
-    for env in envs:
-        for lots in n_lots:
-            for agent in ['sl_agent', 'linear_sl_agent']:
-                print(f'env: {env}, lots: {lots}, agent: {agent}')
-                start_time = time.time()
-                rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed)
-                np.savez(f'rewards/{env}_{lots}_{agent}.npz', rewards=rewards)
-                end_time = time.time()
-                execution_time = end_time - start_time
-                print("Execution time:", execution_time)
-                print(f'mean rewards: {np.mean(rewards)}')
-                print(f'length of rewards: {len(rewards)}')
+    # for env in envs:
+    #     for lots in n_lots:
+    #         for agent in ['sl_agent', 'linear_sl_agent']:
+    #             print(f'env: {env}, lots: {lots}, agent: {agent}')
+    #             start_time = time.time()
+    #             rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed, terminal_time=150, time_delta=15)
+    #             np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
+    #             end_time = time.time()
+    #             execution_time = end_time - start_time
+    #             print("Execution time:", execution_time)
+    #             print(f'mean rewards: {np.mean(rewards)}')
+    #             print(f'length of rewards: {len(rewards)}')
     
-    # n_samples = 10
-    # # n_cpus = 
-    # # agent = 'linear_sl_agent'
+    #### debugging stuff 
+    n_samples = 1
+    # n_cpus = 5
     # agent = 'linear_sl_agent'
-    # # agent = 'sl_agent'
-    # # agent = 'rl_agent'
-    # # agent = 'rl_agent'
-    # env = 'noise'
-    # lots = 40
-    # # seed = 100
-    # # rollout 
-    # start_time = time.time()
-    # rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent=agent, market_type=env, volume=lots)
-    # end_time = time.time()
-    # execution_time = end_time - start_time
-    # print("Execution time:", execution_time)
-    # print(f'rewards: {rewards}')
-    # print(f'times: {times}')
+    # agent = 'sl_agent'
+    agent = 'rl_agent'
+    env = 'noise'
+    lots = 20
+    seed = 100
+    # rollout 
+    start_time = time.time()
+    rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print("Execution time:", execution_time)
+    print(f'rewards: {rewards}')
+    print(f'times: {times}')
 
     # rollout benchmark with multiprocessing 
     # start_time = time.time()
