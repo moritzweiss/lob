@@ -642,7 +642,7 @@ class RLAgent(ExecutionAgent):
         methods:
             - ... 
     """
-    def __init__(self, action_book_levels, observation_book_levels, volume, terminal_time, start_time, time_delta, priority) -> None:
+    def __init__(self, action_book_levels, observation_book_levels, volume, terminal_time, start_time, time_delta, priority, initial_shape_file=None) -> None:
         """
         args:
             - action_book_levels: for example if this is = 2, post on the first two levels of the order book, action space is then [m,l1,l2,inactive]
@@ -662,11 +662,18 @@ class RLAgent(ExecutionAgent):
         # observation space length depends on features and queue positions, see the code below 
         # note: adding queue positions did not improve the result in the flow 40 case 
         # currently no better idea than setting this manually 
-        self.observation_space_length = 179
+        self.observation_space_length = 176
         self.observation_book_levels = observation_book_levels
         # market, l1, l2, inactive
         self.action_space_length = action_book_levels + 2 
         self.action_book_levels = action_book_levels
+
+        if initial_shape_file is not None:
+            self.initial_shape = (np.load(initial_shape_file)['bidv']+np.load(initial_shape_file)['askv'])/2
+        else:
+            # some normalization constant 
+            self.initial_shape = 20
+            
         
     def generate_order(self, lob, time, action):
         """ 
@@ -793,9 +800,10 @@ class RLAgent(ExecutionAgent):
             imbalance = 0
         else:
             imbalance = np.sum(bid_volumes - ask_volumes)/np.sum(bid_volumes + ask_volumes)
-        # normalize volumes
-        bid_volumes /= 20
-        ask_volumes /= 20
+            
+        # normalize volumes through initial shape files 
+        bid_volumes /= self.initial_shape[:self.observation_book_levels]
+        ask_volumes /= self.initial_shape[:self.observation_book_levels]
 
         # order distribution 
         volume_per_level, _ = self.get_order_allocation(lob, self.observation_book_levels)
