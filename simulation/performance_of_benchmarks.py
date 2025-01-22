@@ -15,7 +15,7 @@ import time
 
 
 class Market():
-    def __init__(self, market_env='noise', execution_agent='sl_agent', volume=10, seed=0, terminal_time=300, time_delta=30):
+    def __init__(self, market_env='noise', execution_agent='sl_agent', volume=10, seed=0, terminal_time=150, time_delta=15):
         
         assert market_env in ['noise', 'flow', 'strategic']
         assert execution_agent in ['market_agent', 'sl_agent', 'linear_sl_agent']
@@ -23,7 +23,8 @@ class Market():
         self.agents = {}
         self.terminal_time = terminal_time
         
-        # initial agent         
+        # initial agent
+        initial_agent_config['start_time'] = 0       
         if market_env == 'noise':
             initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise.npz'
         else:
@@ -33,27 +34,22 @@ class Market():
         self.agents[agent.agent_id] = agent
 
 
-        # noise agent 
+        # setting up the noise agent 
+        noise_agent_config['start_time'] = 0 
+        noise_agent_config['terminal_time'] = terminal_time
         noise_agent_config['rng'] = np.random.default_rng(seed)
         noise_agent_config['unit_volume'] = False
-        noise_agent_config['terminal_time'] = terminal_time
-        noise_agent_config['start_time'] = 0 
-        noise_agent_config['fall_back_volume'] = 5
         # TODO: make start time more consistent 
         if market_env == 'noise':
             noise_agent_config['imbalance_reaction'] = False
             agent = NoiseAgent(**noise_agent_config)
-            self.agents[agent.agent_id] = agent
         else: 
             noise_agent_config['imbalance_reaction'] = True
-            noise_agent_config['imbalance_factor'] = 2.0
-            noise_agent_config['damping_factor'] = 0.1
             agent = NoiseAgent(**noise_agent_config)            
-        # TODO: make those intensity adjustments automatically 
             agent.limit_intensities = agent.limit_intensities * 0.85
             agent.market_intensity = agent.market_intensity * 0.85
             agent.cancel_intensities = agent.cancel_intensities * 0.85
-            self.agents[agent.agent_id] = agent
+        self.agents[agent.agent_id] = agent
 
         # strategic agent 
         if market_env == 'strategic':
