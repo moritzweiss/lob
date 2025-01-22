@@ -42,7 +42,7 @@ noise_agent_config['volume_min'] = 1
 noise_agent_config['volume_max'] = 20
 noise_agent_config['unit_volume'] = False
 noise_agent_config['level'] = 30 
-noise_agent_config['fall_back_volume'] = None 
+noise_agent_config['fall_back_volume'] = 5
 
 # 
 noise_agent_config['initial_shape'] = None
@@ -60,7 +60,7 @@ noise_agent_config['initial_bid'] = 1000
 noise_agent_config['initial_ask'] = 1001
 
 # 
-noise_agent_config['start_time'] = 0 
+noise_agent_config['start_time'] = -15
 noise_agent_config['terminal_time'] = None
 noise_agent_config['priority'] = 1
 
@@ -92,12 +92,15 @@ rl_agent_config['terminal_time'] = None
 rl_agent_config['start_time'] = 0
 rl_agent_config['time_delta'] = 500
 rl_agent_config['priority'] = 0
-rl_agent_config['action_book_levels'] = 4 
-rl_agent_config['observation_book_levels'] = 6
+# rl_agent_config['action_book_levels'] = 4 
+rl_agent_config['action_book_levels'] = 5 
+# rl_agent_config['observation_book_levels'] = 6
+rl_agent_config['observation_book_levels'] = 5
+rl_agent_config['initial_shape_file'] = None 
 
 # strategic
 strategic_agent_config = {}
-strategic_agent_config['start_time'] = 10
+strategic_agent_config['start_time'] = -15
 strategic_agent_config['time_delta'] = 50
 strategic_agent_config['market_volume'] = 1
 strategic_agent_config['limit_volume'] = 3
@@ -107,7 +110,7 @@ strategic_agent_config['terminal_time'] = 150
 
 # initial 
 initial_agent_config = {}   
-initial_agent_config['start_time'] = 0
+initial_agent_config['start_time'] = -15
 initial_agent_config['initial_bid'] = 1000
 initial_agent_config['initial_ask'] = 1001
 initial_agent_config['n_initial_levels'] = 30
