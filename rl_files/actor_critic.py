@@ -21,8 +21,10 @@ from simulation.market_gym import Market
 
 @dataclass
 class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    exp_name: str = 'actor_critic'
     """the name of this experiment"""
+    tag: str = None
+    """additional tag for the experiment"""
     seed: int = 0
     """seed of the experiment"""
     eval_seed: int = 100
@@ -46,7 +48,7 @@ class Args:
     # noise, flow, strategic 
     env_type: str = "noise"
     """the id of the environment"""
-    num_lots: int = 20
+    num_lots: int = 60
     """the number of lots"""
     terminal_time: int = 150
     """the terminal time for the execution agent"""
@@ -54,10 +56,10 @@ class Args:
     """the time delta for the execution agent"""
     # total_timesteps: int = 200*128*100
     # total_timesteps: int = 100*128*100
-    # total_timesteps: int = 2*100
-    total_timesteps: int = 100*128*100
+    # total_timesteps: int = 2*100*128
+    total_timesteps: int = 500*128*100
     """total timesteps of the experiments"""
-    learning_rate: float = 1e-2
+    learning_rate: float = 5e-4
     """the learning rate of the optimizer"""
     num_envs: int = 128
     # num_envs: int = 1 
@@ -65,7 +67,7 @@ class Args:
     num_steps: int = 100
     # less value bootstraping --> user more steps per environment 
     """the number of steps to run in each environment per policy rollout"""
-    anneal_lr: bool = True
+    anneal_lr: bool = False
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 1.0
     """the discount factor gamma"""
@@ -157,6 +159,7 @@ class AgentSoftmax(nn.Module):
             layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)-1), std=1e-5),
         )
         # custom bias in the last layer 
+        # should remove this. just set te bias to zero. check the effect of this ... 
         x = -1.0*torch.ones(np.prod(envs.single_action_space.shape)-1)
         x[-1] = 1.0
         self.actor_mean[-1].bias.data.copy_(x)
@@ -241,11 +244,17 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}')
-    run_name = f"{args.exp_name}_{args.env_type}_{args.num_lots}_seed_{args.seed}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}"
+    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}', 'learning_rate=', args.learning_rate, 'num_iterations=', args.num_iterations, 'num_envs=', args.num_envs, 'n_evalutation_episodes=', args.n_evalutation_episodes)
+
+    if args.tag:
+        run_name = f"{args.exp_name}_{args.env_type}_{args.num_lots}_seed_{args.seed}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.tag}"
+    else:
+        run_name = f"{args.exp_name}_{args.env_type}_{args.num_lots}_seed_{args.seed}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}"
     print(f'the run name is: {run_name}')
 
-    writer = SummaryWriter(f"{args.run_directory}/{run_name}")
+    summary_path = f"{parent_dir}/{args.run_directory}/{run_name}"
+    print(f'writing summary to {summary_path}:')
+    writer = SummaryWriter(summary_path)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -280,7 +289,7 @@ if __name__ == "__main__":
 
     # agent set up 
     agent = AgentSoftmax(envs).to(device)
-    print(f'the agent is: {agent}')
+    # print(f'the agent is: {agent}')
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -298,7 +307,11 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device) 
     next_done = torch.zeros(args.num_envs).to(device)
 
-    for iteration in range(1, args.num_iterations + 1):
+    if args.num_iterations < 2: 
+        raise ValueError('num_iterations should be greater than 1')
+
+    for iteration in range(0, args.num_iterations):
+        print(f'iteration={iteration}')
         # Annealing the rate if instructed to do so.
         returns = []
         times = []
@@ -309,8 +322,11 @@ if __name__ == "__main__":
             optimizer.param_groups[0]["lr"] = lrnow
             print(f' the lerning rate is {lrnow}')
         
-        # manual variance scaling 
-        agent.variance = 1 - iteration/(args.num_iterations+1) + 1e-2 
+        # manual standard deviation scalig. updated this to 0.1
+        agent.variance = (0.32-1)*(iteration)/(args.num_iterations-1) + 1
+        # agent.variance = 1 - iteration/(args.num_iterations+1) + 5e-1
+        # keep same variance throughout the training
+        # agent.variance = 1.0
         print(f'the current variance is {agent.variance}')
 
         for step in range(0, args.num_steps):
@@ -340,8 +356,7 @@ if __name__ == "__main__":
         
         writer.add_scalar("charts/return", np.mean(returns), global_step)
         writer.add_scalar("charts/time", np.mean(times), global_step)
-        writer.add_scalar("charts/drift", np.mean(drifts), global_step)
-        print(f'iteration={iteration}')
+        writer.add_scalar("charts/drift", np.mean(drifts), global_step)        
             
         # bootstrap value if not done
         with torch.no_grad():
@@ -458,9 +473,11 @@ if __name__ == "__main__":
         print(f'evaluation time: {time.time()-start_time}')
         print(f'reward length: {len(episodic_returns)}')
         rewards = np.array(episodic_returns)        
-        file_name = f"{parent_dir}/rewards/{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}.npz"
+        # file_name = f"{parent_dir}/rewards/{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}.npz"
+        file_name = f'{parent_dir}/rewards/{run_name}.npz'
+        # file_name = run_name + '.npz'
         np.savez(file_name, rewards=rewards)
-        print(f'saved rewards to {file_name}')
+        print(f'save rewards to {file_name}')
 
     envs.close()
     writer.close()
