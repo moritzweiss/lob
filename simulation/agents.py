@@ -662,11 +662,14 @@ class RLAgent(ExecutionAgent):
         # observation space length depends on features and queue positions, see the code below 
         # note: adding queue positions did not improve the result in the flow 40 case 
         # currently no better idea than setting this manually 
-        self.observation_space_length = 176
-        self.observation_book_levels = observation_book_levels
+        # self.observation_space_length = 176
+        # self.observation_space_length = 146 # shape with new queue position encoding 
+        self.observation_space_length = 6+4+6+5+5+2*int(volume)
+        # final shape is 6+4+6+5+5+60+60 with observable levels = 5 
         # market, l1, l2, inactive
         self.action_space_length = action_book_levels + 2 
         self.action_book_levels = action_book_levels
+        self.observation_book_levels = observation_book_levels
 
         if initial_shape_file is not None:
             self.initial_shape = (np.load(initial_shape_file)['bidv']+np.load(initial_shape_file)['askv'])/2
@@ -794,9 +797,9 @@ class RLAgent(ExecutionAgent):
         bid_volumes = lob.data.bid_volumes[-1][:self.observation_book_levels]
         ask_volumes = lob.data.ask_volumes[-1][:self.observation_book_levels]        
         if np.sum(bid_volumes+ask_volumes) == 0:
-            print('first 5 bid+ask volumes are zero')
-            print(f'all bid vols: {lob.data.bid_volumes[-1]}')
-            print(f'all ask vols: {lob.data.ask_volumes[-1]}')
+            # print('first 5 bid+ask volumes are zero')
+            # print(f'all bid vols: {lob.data.bid_volumes[-1]}')
+            # print(f'all ask vols: {lob.data.ask_volumes[-1]}')
             imbalance = 0
         else:
             imbalance = np.sum(bid_volumes - ask_volumes)/np.sum(bid_volumes + ask_volumes)
@@ -814,25 +817,66 @@ class RLAgent(ExecutionAgent):
             order_dist = np.array(order_dist, dtype=np.float32)
         else:
             order_dist = np.array(order_dist, dtype=np.float32)/self.volume
-
+        
+        # old one hot queue position encoding 
         # record queue position for the first two levels  
-        max_length = 50
-        max_level = 3 ## maybe change this later to self.observation_book_levels 
-        queue_positions = np.zeros((max_length, max_level), dtype=np.float32)
-        for l in range(max_level):
+        # max_length = 50
+        # max_level = 3 ## maybe change this later to self.observation_book_levels 
+        # queue_positions = np.zeros((max_length, max_level), dtype=np.float32)
+        # for l in range(max_level):
+        #     pos = 0 
+        #     price = best_bid+l+1
+        #     if price in lob.price_map['ask']:
+        #         for id in lob.price_map['ask'][price]:
+        #             volume = lob.order_map[id].volume
+        #             agent_id = lob.order_map[id].agent_id
+        #             if agent_id == self.agent_id:
+        #                 queue_positions[int(pos):int(pos+volume), l] = 1
+        #             pos += volume        
+        #     else:  
+        #         pass        
+        # queue_positions = queue_positions.flatten()
+
+        # new queue position encoding 
+        # TODO: volume encoding with level, queue position, and volume 
+        levels = []
+        queues = []
+        volume_within_range = 0
+        for level in range(1, self.observation_book_levels+1):
             pos = 0 
-            price = best_bid+l+1
+            price = best_bid+level
             if price in lob.price_map['ask']:
                 for id in lob.price_map['ask'][price]:
                     volume = lob.order_map[id].volume
                     agent_id = lob.order_map[id].agent_id
                     if agent_id == self.agent_id:
-                        queue_positions[int(pos):int(pos+volume), l] = 1
+                        levels.extend(int(volume)*[level])
+                        queues.extend(list(range(int(pos), int(pos+volume))))
+                        volume_within_range += volume
                     pos += volume        
             else:  
                 pass        
-        queue_positions = queue_positions.flatten()
+        
+        max_queue_size = 40 
+        # volume outside the price range or inactive 
+        volume_outside = self.volume - volume_within_range
+        assert 0 <= volume_outside <= self.volume
+        levels.extend([self.observation_book_levels+1]*int(volume_outside))
+        queues.extend([max_queue_size]*int(volume_outside))
 
+        # filled volume 
+        filled_volume = self.initial_volume - self.volume
+        assert filled_volume+volume_within_range+volume_outside == self.initial_volume
+        levels.extend([-self.observation_book_levels]*int(filled_volume))
+        queues.extend([-max_queue_size]*int(filled_volume))
+
+        # queues and levels 
+        assert len(queues) == self.initial_volume
+        assert len(levels) == self.initial_volume
+
+        # normalization 
+        queues = np.array(queues, dtype=np.float32)/max_queue_size
+        levels = np.array(levels, dtype=np.float32)/(self.observation_book_levels+1)
         
         # market order imbalance 
         buys = [x for x, t in zip(lob.data.market_buy, lob.data.time_stamps) if t >= time-self.time_delta and t <= time]  
@@ -858,11 +902,14 @@ class RLAgent(ExecutionAgent):
         deltat_drift = np.array([(mid_price_now - mid_price_old)/10], dtype=np.float32)
                         
         # concat everything into one observation 
+        # 
         observation = np.array([time/self.terminal_time, self.volume/self.initial_volume, bid_price_drift, mid_price_drift, spread, imbalance], dtype=np.float32)
         observation = np.concatenate([observation, market_order_imbalance, limit_order_imbalance, deltat_drift], dtype=np.float32)
         observation = np.concatenate([observation, order_dist], dtype=np.float32)
         observation = np.concatenate([observation, bid_volumes, ask_volumes], dtype=np.float32)
-        observation = np.concatenate([observation, queue_positions], dtype=np.float32)
+        observation = np.concatenate([observation, levels, queues], dtype=np.float32)
+
+        # final shape is 6+4+6+5+5+60+60 with observable levels = 5 
     
         return observation
     
