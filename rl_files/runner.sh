@@ -19,13 +19,14 @@ do
   set -- $args 
   ARG1=$1
   ARG2=$2
-  TIMESTEPS=$((400 * 128 * 100))
+  TIMESTEPS=$((500 * 128 * 100))
 
   echo "######"
   echo "#####" 
   echo "STARTING A RUN"  
   echo "Running $PYTHON_SCRIPT with arguments: $ARG1 $ARG2"
-  python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$TIMESTEPS" --num_envs "128" --num_steps "100" --n_evalutation_episodes "10000"
+  python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$TIMESTEPS" --num_envs "128" --num_steps "100" --n_evalutation_episodes "10000" --tag "with_var_reduction"
+  # var reduction is to variance of 0.1
 done
 
 echo "All processes completed."
