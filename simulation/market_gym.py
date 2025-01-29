@@ -303,20 +303,23 @@ def rollout(seed, n_episodes, execution_agent, market_type, volume, terminal_tim
         observation, info = M.reset()
         if execution_agent == 'rl_agent':
             print('NEW EPISODE')
-            print(observation)
+            # print(observation)
             terminated = False
             while not terminated:
                 # action = np.array([-10, 10, -10, -10, -10], dtype=np.float32)
                 # action = np.array([-10, -10, 10, -10, -10, -10], dtype=np.float32)
-                action = np.array([0,0,1,0,0,0], dtype=np.float32)
+                action = np.array([0,0,1,0,0,0,0], dtype=np.float32)
                 # action = np.array([-10, -10, -10, -10, 10], dtype=np.float32)
                 # action = np.random.dirichlet(np.ones(M.action_space.shape[0]))
                 # action = np.array([0, 1, 0, 0, 0], dtype=np.float32)
+                # print(action.shape)
+                # print(M.action_space)
                 assert action in M.action_space
                 observation, reward, terminated, truncated, info = M.step(action)
-                print('observation')
-                print(observation.shape)
-                # assert observation in M.observation_space
+                # print('observation')
+                # print(observation)
+                # print(observation.shape)
+                assert observation in M.observation_space
                 # print(f'queues: {observation[1]}')
                 # print(observation)
         # print(info)
@@ -369,17 +372,17 @@ if __name__ == '__main__':
     #             print(f'length of rewards: {len(rewards)}')
     
     #### debugging stuff 
-    n_samples = 1
+    n_samples = 5
     # n_cpus = 5
     # agent = 'linear_sl_agent'
     # agent = 'sl_agent'
     agent = 'rl_agent'
     env = 'noise'
-    lots = 20
+    lots = 60
     seed = 100
     # rollout 
     start_time = time.time()
-    rewards, times, n_events = rollout(seed=0, n_episodes=10, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
+    rewards, times, n_events = rollout(seed=0, n_episodes=n_samples, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
     end_time = time.time()
     execution_time = end_time - start_time
     print("Execution time:", execution_time)
