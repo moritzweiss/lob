@@ -170,22 +170,30 @@ if __name__ == '__main__':
     # bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = get_statistics(n_steps=int(1e2), rng=default_rng(0), initial_shape=5, damping_factor=0.65, imbalance=False, frequency=10, totol_trades_window=10)
     # compute average statistics using multiprocessing
     damping_factor = 65
-    n_samples = int(3e6)
+    n_samples = int(1e5)
     start_time = timeit.default_timer()
-    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=80, initial_shape=1, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=100)
+    # bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=80, initial_shape=1, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=100)
+    # fig, axs = plt.subplots(figsize=(10, 6))
+    # plot_average_book_shape(bidv, askv, level=20, file_name=f'noise', title='noise', ax=axs, symetric=True)
+    # fig.tight_layout()
+    # fig.savefig(f'plots/test_shape.pdf', dpi=350)
     # np.savez(f'initial_shape/noise_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=n_samples, n_cpus=60, initial_shape=1, damping_factor=damping_factor/100, imbalance=True, imbalance_factor=2.0, frequency=100, total_trades_window=100)
+    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=n_samples, n_cpus=60, initial_shape=10, damping_factor=damping_factor/100, imbalance=True, imbalance_factor=2.0, frequency=100, total_trades_window=100)
+    fig, axs = plt.subplots(figsize=(10, 6))
+    plot_average_book_shape(bidv_imb, askv_imb, level=20, file_name=f'noise', title='noise', ax=axs, symetric=True)
+    fig.tight_layout()
+    fig.savefig(f'plots/test_shape_flow.pdf', dpi=350)
     # np.savez(f'initial_shape/noise_flow_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    end_time = timeit.default_timer()
-    print(f"Execution time: {end_time - start_time} seconds")
+    # end_time = timeit.default_timer()
+    # print(f"Execution time: {end_time - start_time} seconds")
     # plot one price trajectory 
     # plot_prices(n_steps=int(1e5), rng=default_rng(4), initial_shape=5, damping_factor=0.8, shape_file='initial_shape/noise_unit.npz')
     # average_shape(n_steps=4000, rng=default_rng(0), initial_shape=5, damping_factor=0.5, imbalance=False)
     # print(f"average time step noise = {np.mean(average_time_step)}")
     # print(f"average time step noise+flow = {np.mean(average_time_step_imb)}")
     # #####    
-    name = ''
-    plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=50)
+    # name = ''
+    # plot_average_shape(name, bidv, askv, bidv_imb, askv_imb, level=50)
     # maybe bar plots make more sense here ?? 
     # trades_hist(trades, trades_imb)
-    plot_mid_price_changes(name=name, midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
+    # plot_mid_price_changes(name=name, midp_diff=midp_diff, midp_diff_imb=midp_diff_imb)
