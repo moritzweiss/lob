@@ -69,6 +69,8 @@ class NoiseAgent():
         
         self.damping_factor = damping_factor        
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
+        # controls whether imbalance calculation starts at the best prices 
+        self.start_imbalance_at_best = True
         self.imbalance_reaction = imbalance_reaction
         self.imbalance_factor = imbalance_factor
 
@@ -222,15 +224,26 @@ class NoiseAgent():
             if np.sum(bid_volumes) == 0:
                 weighted_bid_volumes = 0
             else:
-                # idx = np.nonzero(bid_volumes)[0][0]
-                # weighted_bid_volumes = np.sum(self.damping_weights[:L-idx]*bid_volumes[idx:])
-                weighted_bid_volumes = np.sum(self.damping_weights*bid_volumes)
+                if self.start_imbalance_at_best:
+                    spread = int(best_ask_price - best_bid_price)
+                    # idx = np.nonzero(bid_volumes)[0][0]
+                    # assert spread - 1  == idx 
+                    # L = 30, spread = 2, 0:L-1, 1:L 
+                    weighted_bid_volumes = np.sum(self.damping_weights[:L-spread+1]*bid_volumes[spread-1:])
+                else:
+                    weighted_bid_volumes = np.sum(self.damping_weights*bid_volumes)
             if np.sum(ask_volumes) == 0:
                 weighted_ask_volumes = 0
             else:
+                if self.start_imbalance_at_best:
+                    spread = int(best_ask_price - best_bid_price)
+                    # idx = np.nonzero(ask_volumes)[0][0]
+                    # assert spread - 1  == idx 
+                    weighted_ask_volumes = np.sum(self.damping_weights[:L-spread+1]*ask_volumes[spread-1:])
                 # idx = np.nonzero(ask_volumes)[0][0]
                 # weighted_ask_volumes = np.sum(self.damping_weights[:L-idx]*ask_volumes[idx:])
-                weighted_ask_volumes = np.sum(self.damping_weights*ask_volumes)
+                else:
+                    weighted_ask_volumes = np.sum(self.damping_weights*ask_volumes)
             if (weighted_bid_volumes + weighted_ask_volumes) == 0:
                 imbalance = 0
             else:
@@ -534,6 +547,7 @@ class SubmitAndLeaveAgent(ExecutionAgent):
         super().__init__(volume, 'sl_agent', priority)
         self.terminal_time = terminal_time
         self.start_time = start_time
+        self.place_at_best_ask = True
                         
     def generate_order(self, lob, time):
         assert self.volume >= 0
@@ -541,7 +555,10 @@ class SubmitAndLeaveAgent(ExecutionAgent):
         assert 0 <= time <= self.terminal_time        
         if time == self.start_time:
             self.reference_bid_price = lob.get_best_price('bid')
-            limit_price = lob.get_best_price('bid')+1
+            if self.place_at_best_ask:
+                limit_price = lob.get_best_price('ask')
+            else:
+                limit_price = lob.get_best_price('bid')+1
             # print(f'reference bid price is {self.reference_bid_price}')
             # print(f'placing limit order at {limit_price}')            
             return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
@@ -576,6 +593,7 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         self.start_time = start_time
         self.time_delta = time_delta
         self.volume_slice = volume/time_steps
+        self.place_at_best_ask = True
         # self.action_times = np.arange(start_time, terminal_time+time_delta, time_delta)
         if volume >= time_steps:
             self.volume_slice = int(volume/time_steps)
@@ -592,7 +610,10 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         if (time-self.start_time)%self.time_delta == 0:
             if time == self.start_time:
                 self.reference_bid_price = lob.get_best_price('bid')
-                limit_price = lob.get_best_price('bid')+1
+                if self.place_at_best_ask:
+                    limit_price = lob.get_best_price('ask')
+                else:
+                    limit_price = lob.get_best_price('bid')+1
                 if self.submit_and_leave:
                     return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
                 else:
@@ -670,6 +691,7 @@ class RLAgent(ExecutionAgent):
         self.action_space_length = action_book_levels + 2 
         self.action_book_levels = action_book_levels
         self.observation_book_levels = observation_book_levels
+        self.start_at_best_price = True
 
         if initial_shape_file is not None:
             self.initial_shape = (np.load(initial_shape_file)['bidv']+np.load(initial_shape_file)['askv'])/2
@@ -794,8 +816,12 @@ class RLAgent(ExecutionAgent):
         spread = (best_ask - best_bid)/10        
 
         # volumes and imbalance 
-        bid_volumes = lob.data.bid_volumes[-1][:self.observation_book_levels]
-        ask_volumes = lob.data.ask_volumes[-1][:self.observation_book_levels]        
+        if self.start_at_best_price:
+            bid_volumes = lob.data.bid_volumes[-1][:self.observation_book_levels]
+            ask_volumes = lob.data.ask_volumes[-1][:self.observation_book_levels]        
+        else:
+            bid_volumes = lob.data.bid_volumes[-1][int(spread-1):self.observation_book_levels+int(spread-1)]
+            ask_volumes = lob.data.ask_volumes[-1][int(spread-1):self.observation_book_levels+int(spread-1)]
         if np.sum(bid_volumes+ask_volumes) == 0:
             # print('first 5 bid+ask volumes are zero')
             # print(f'all bid vols: {lob.data.bid_volumes[-1]}')
@@ -805,11 +831,15 @@ class RLAgent(ExecutionAgent):
             imbalance = np.sum(bid_volumes - ask_volumes)/np.sum(bid_volumes + ask_volumes)
             
         # normalize volumes through initial shape files 
-        bid_volumes /= self.initial_shape[:self.observation_book_levels]
-        ask_volumes /= self.initial_shape[:self.observation_book_levels]
+        if self.start_at_best_price:
+            bid_volumes /= self.initial_shape[int(spread-1):self.observation_book_levels+int(spread-1)]
+            ask_volumes /= self.initial_shape[int(spread-1):self.observation_book_levels+int(spread-1)]
+        else:
+            bid_volumes /= self.initial_shape[:self.observation_book_levels]
+            ask_volumes /= self.initial_shape[:self.observation_book_levels]
 
         # order distribution 
-        volume_per_level, _ = self.get_order_allocation(lob, self.observation_book_levels)
+        volume_per_level, _ = self.get_order_allocation(lob, self.observation_book_levels, start_at_best_price=self.start_at_best_price)
         volume_per_level.append(self.volume-self.active_volume)
         order_dist = np.array(volume_per_level)
         assert np.sum(order_dist) == self.volume        
@@ -844,7 +874,10 @@ class RLAgent(ExecutionAgent):
         volume_within_range = 0
         for level in range(1, self.observation_book_levels+1):
             pos = 0 
-            price = best_bid+level
+            if self.start_at_best_price:
+                price = best_ask+level-1
+            else:
+                price = best_bid+level
             if price in lob.price_map['ask']:
                 for id in lob.price_map['ask'][price]:
                     volume = lob.order_map[id].volume
@@ -913,7 +946,7 @@ class RLAgent(ExecutionAgent):
     
         return observation
     
-    def get_order_allocation(self, lob, n_levels):
+    def get_order_allocation(self, lob, n_levels, start_at_best_price=False):
         """
             returns
                 - list of volumes: [v_1, v_2,... , v_n_levels, v_>n_levels], corresponfing to best_bid+1, best_bid+2, ..., best_bid+n_levels 
@@ -928,13 +961,17 @@ class RLAgent(ExecutionAgent):
         """
 
         best_bid = lob.get_best_price('bid')
+        best_ask = lob.get_best_price('ask')
         volume_per_level = []
         orders_within_range = set()
         for level in range(1, n_levels+1):
             # 1,2,3, ..., n_levels
             # e.g. if n_levels = 4, then 1,2,3,4
             orders_on_level = 0
-            price = best_bid+level
+            if start_at_best_price:
+                price = best_ask+level-1
+            else:
+                price = best_bid+level
             if price in lob.price_map['ask']:
                 for order_id in lob.price_map['ask'][price]:
                     if lob.order_map[order_id].agent_id == self.agent_id:                                                
