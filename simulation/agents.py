@@ -33,6 +33,7 @@ class NoiseAgent():
     def __init__(self, rng, 
                  level,
                  limit_intensities, market_intensity, cancel_intensities,
+                 intensity_scaling, 
                  initial_shape_file, 
                  initial_shape, 
                  volume_distribution,
@@ -67,6 +68,9 @@ class NoiseAgent():
         rng: np.random number generator instance                                 
         """
         
+        # this is used to scale down intensities 
+        self.intensity_scaling = intensity_scaling
+
         self.damping_factor = damping_factor        
         self.damping_weights = np.exp(-self.damping_factor*np.arange(level)) # move damping weights here for speed up
         # controls whether imbalance calculation starts at the best prices 
