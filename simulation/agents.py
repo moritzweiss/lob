@@ -616,10 +616,20 @@ class LinearSubmitLeaveAgent(ExecutionAgent):
         if (time-self.start_time)%self.time_delta == 0:
             if time == self.start_time:
                 self.reference_bid_price = lob.get_best_price('bid')
-                if self.place_at_best_ask:
-                    limit_price = lob.get_best_price('ask')
-                else:
+                best_ask = lob.get_best_price('ask')
+                if best_ask is np.nan or not self.place_at_best_ask:
+                    # either best_ask is np.nan or we don't place at the best ask 
                     limit_price = lob.get_best_price('bid')+1
+                else:
+                    limit_price = lob.get_best_price('ask')
+                # if self.place_at_best_ask:
+                #     limit_price = lob.get_best_price('ask')
+                #     if limit_price is np.nan:
+                #         limit_price = lob.get_best_price('bid')+1
+                #     else:
+                #         limit_price = lob.get_best_price('ask')
+                # else:
+                #     limit_price = lob.get_best_price('bid')+1
                 if self.submit_and_leave:
                     return [LimitOrder(self.agent_id, side='ask', price=limit_price, volume=self.initial_volume, time=time)]
                 else:
