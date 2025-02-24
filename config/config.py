@@ -44,7 +44,7 @@ noise_agent_config['unit_volume'] = False
 noise_agent_config['level'] = 30 
 noise_agent_config['fall_back_volume'] = 5
 
-# 
+# noise agent config 
 noise_agent_config['initial_shape'] = None
 noise_agent_config['initial_shape_file'] = None 
 # imbalance related stuff 
@@ -52,6 +52,7 @@ noise_agent_config['damping_factor'] = 0.65
 noise_agent_config['imbalance_reaction'] = False
 noise_agent_config['imbalance_factor'] = 2.0
 noise_agent_config['default_waiting_time'] = 1e-6
+noise_agent_config['intensity_scaling'] = 0.85
 
 # 
 noise_agent_config['rng'] = np.random.default_rng(0)
@@ -101,9 +102,9 @@ rl_agent_config['initial_shape_file'] = None
 # strategic
 strategic_agent_config = {}
 strategic_agent_config['start_time'] = -15
-strategic_agent_config['time_delta'] = 50
+strategic_agent_config['time_delta'] = 3
 strategic_agent_config['market_volume'] = 1
-strategic_agent_config['limit_volume'] = 3
+strategic_agent_config['limit_volume'] = 2
 strategic_agent_config['rng'] = None 
 strategic_agent_config['priority'] = 2
 strategic_agent_config['terminal_time'] = 150
