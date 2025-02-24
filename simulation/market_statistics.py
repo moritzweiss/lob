@@ -1,3 +1,4 @@
+# TODO: should integrate this whole thing into market gym directly
 
 from agents import NoiseAgent, LinearSubmitLeaveAgent, StrategicAgent, SubmitAndLeaveAgent, MarketAgent, RLAgent, InitialAgent
 from limit_order_book.limit_order_book import LimitOrderBook
