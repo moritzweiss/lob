@@ -43,9 +43,10 @@ class Market(gym.Env):
         
         # initial agent         
         if config['market_env'] == 'noise':
-            initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_65.npz'
+            initial_agent_config['initial_shape_file'] = f'{parent_dir}/initial_shape/noise_65.npz'
+            initial_agent_config['initial_shape_file'] = f'{parent_dir}/initial_shape/noise_65.npz'
         else:
-            initial_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_65.npz'
+            initial_agent_config['initial_shape_file'] = f'{parent_dir}/initial_shape/noise_flow_65.npz'
         initial_agent_config['start_time'] = -config['time_delta']
         agent = InitialAgent(**initial_agent_config)
         self.agents[agent.agent_id] = agent
@@ -111,9 +112,9 @@ class Market(gym.Env):
             rl_agent_config['time_delta'] = config['time_delta']
             rl_agent_config['volume'] = config['volume']
             if config['market_env'] == 'noise':
-                rl_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_65.npz'
+                rl_agent_config['initial_shape_file'] = f'{parent_dir}/initial_shape/noise_65.npz'
             else:
-                rl_agent_config['initial_shape_file'] = '/u/weim/lob/initial_shape/noise_flow_65.npz'
+                rl_agent_config['initial_shape_file'] = f'{parent_dir}/initial_shape/noise_flow_65.npz'
             agent = RLAgent(**rl_agent_config)
 
         self.agents[agent.agent_id] = agent
@@ -348,46 +349,46 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed, te
 if __name__ == '__main__':
     
     #### run full parallel benchmark rollouts
-    saving_directory = 'rewards'
-    n_samples = 10000
-    # n_samples = 5000
-    n_cpus = 100
-    seed = 100
-    envs = ['noise', 'flow', 'strategic']
-    # envs = ['strategic']
-    n_lots = [20, 60]
-    # n_lots = [10, 60]    
+    # saving_directory = 'rewards'
+    # n_samples = 10000
+    # # n_samples = 5000
+    # n_cpus = 100
+    # seed = 100
+    # envs = ['noise', 'flow', 'strategic']
+    # # envs = ['strategic']
+    # n_lots = [20, 60]
+    # # n_lots = [10, 60]    
 
-    for env in envs:
-        for lots in n_lots:
-            for agent in ['sl_agent', 'linear_sl_agent']:
-                print(f'env: {env}, lots: {lots}, agent: {agent}')
-                start_time = time.time()
-                rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed, terminal_time=150, time_delta=15)
-                np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
-                end_time = time.time()
-                execution_time = end_time - start_time
-                print("Execution time:", execution_time)
-                print(f'mean rewards: {np.mean(rewards)}')
-                print(f'length of rewards: {len(rewards)}')
+    # for env in envs:
+    #     for lots in n_lots:
+    #         for agent in ['sl_agent', 'linear_sl_agent']:
+    #             print(f'env: {env}, lots: {lots}, agent: {agent}')
+    #             start_time = time.time()
+    #             rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed, terminal_time=150, time_delta=15)
+    #             np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
+    #             end_time = time.time()
+    #             execution_time = end_time - start_time
+    #             print("Execution time:", execution_time)
+    #             print(f'mean rewards: {np.mean(rewards)}')
+    #             print(f'length of rewards: {len(rewards)}')
     
     #### debugging stuff 
-    # n_samples = 5
-    # # n_cpus = 5
-    # # agent = 'linear_sl_agent'
-    # # agent = 'sl_agent'
-    # agent = 'rl_agent'
-    # env = 'noise'
-    # lots = 60
-    # seed = 100
-    # # rollout 
-    # start_time = time.time()
-    # rewards, times, n_events = rollout(seed=0, n_episodes=n_samples, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
-    # end_time = time.time()
-    # execution_time = end_time - start_time
-    # print("Execution time:", execution_time)
-    # print(f'rewards: {rewards}')
-    # print(f'times: {times}')
+    n_samples = 5
+    # n_cpus = 5
+    # agent = 'linear_sl_agent'
+    # agent = 'sl_agent'
+    agent = 'rl_agent'
+    env = 'noise'
+    lots = 60
+    seed = 100
+    # rollout 
+    start_time = time.time()
+    rewards, times, n_events = rollout(seed=0, n_episodes=n_samples, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print("Execution time:", execution_time)
+    print(f'rewards: {rewards}')
+    print(f'times: {times}')
 
     # rollout benchmark with multiprocessing 
     # start_time = time.time()

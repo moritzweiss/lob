@@ -3,6 +3,7 @@
 
 echo "starting the script now" 
 
+# change this to your directory 
 PYTHON_SCRIPT="/u/weim/lob/rl_files/actor_critic.py"
 
 declare -a ARGS=(
