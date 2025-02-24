@@ -15,9 +15,6 @@ import seaborn as sns
 import sys
 import matplotlib.pyplot as plt
 import os 
-# current = os.path.dirname(os.path.realpath(__file__))
-# parent = os.path.dirname(current)
-# sys.path.append(parent)
 
 """
     - this code is desgigned to obtain market statistic: like mid price drift, number of trades, number of events
