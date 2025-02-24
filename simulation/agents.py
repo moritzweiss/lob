@@ -1,3 +1,5 @@
+# this file contains all agents relevant for the simulation 
+
 import sys
 import os 
 current = os.path.dirname(os.path.realpath(__file__))
