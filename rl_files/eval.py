@@ -9,7 +9,7 @@ from typing import Callable, List
 import gymnasium as gym
 import torch
 # from ppo_continuous_action import Agent, AgentDirichlet
-from actor_critic import AgentSoftmax, DirichletAgent
+from actor_critic import AgentLogisticNormal, DirichletAgent
 # from ppo_modified import Agent
 import numpy as np
 import time 
@@ -92,7 +92,7 @@ if __name__=="__main__":
         model_path=model_path,
         env_fns=env_fns,
         eval_episodes=4000,
-        Model=AgentSoftmax,
+        Model=AgentLogisticNormal,
         # device="cpu",
     )
     
