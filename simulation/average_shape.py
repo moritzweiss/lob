@@ -21,7 +21,7 @@ from queue import PriorityQueue
 
 
 def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, 
-                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, totol_trades_window=1000, level=30):
+                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, total_trades_window=1000, level=30):
 
     ''''
     computes some statistics like average bid and ask volumes, mid price changes, and total trades over a sliding window of size totol_trades_window
@@ -96,8 +96,9 @@ def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_fact
     midp = (np.array(LOB.data.best_ask_prices)+np.array(LOB.data.best_bid_prices))/2
     # totol trades over a sliding window of size totol_trades_window
     total_trades = np.array(LOB.data.market_buy[-int(T/2):])+np.array(LOB.data.market_sell[-int(T/2):])    
-    window = np.lib.stride_tricks.sliding_window_view(total_trades, window_shape=totol_trades_window)
-    total_trades = np.sum(window, axis=-1)
+    assert total_trades_window <= len(total_trades), f'total_trades_window {total_trades_window} is larger than the number of trades {len(total_trades)}'
+    window = np.lib.stride_tricks.sliding_window_view(total_trades, window_shape=total_trades_window)
+    total_trades = np.sum(window, axis=-1)    
     average_time_step = np.mean(np.diff(LOB.data.time_stamps[-int(T/2):]))
     return bid_volumes, ask_volumes, midp_diff, midp, window.sum(axis=-1), average_time_step
 
@@ -175,20 +176,26 @@ if __name__ == '__main__':
     ##### compute average statistics using multiprocessing
 
     ## compute book shapes 
+    n_cpus = 10
     damping_factor = 65
-    n_samples = int(1e5)
+    n_samples = int(1e3)
     start_time = timeit.default_timer()
-    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=80, initial_shape=1, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=100)
+    n_cpus = 1
+    total_trades_window = 2 
+    print(f'number of cpus: {n_cpus}, number of samples: {n_samples}, damping factor: {damping_factor}, total_trades_window: {total_trades_window}')
+    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, initial_shape=1, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=total_trades_window)
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv, askv, level=20, file_name=f'noise', title='noise', ax=axs, symetric=True)
     fig.tight_layout()
     fig.savefig(f'plots/shape_noise.pdf', dpi=350)
+    # saving: 
     # np.savez(f'initial_shape/noise_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
-    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=n_samples, n_cpus=60, initial_shape=10, damping_factor=damping_factor/100, imbalance=True, imbalance_factor=2.0, frequency=100, total_trades_window=100)
+    bidv_imb, askv_imb, midp_diff_imb, trades_imb, average_time_step_imb = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, initial_shape=10, damping_factor=damping_factor/100, imbalance=True, imbalance_factor=2.0, frequency=100, total_trades_window=total_trades_window)
     fig, axs = plt.subplots(figsize=(10, 6))
     plot_average_book_shape(bidv_imb, askv_imb, level=20, file_name=f'noise', title='noise', ax=axs, symetric=True)
     fig.tight_layout()
     fig.savefig(f'plots/shape_flow.pdf', dpi=350)
+    # saving: 
     # np.savez(f'initial_shape/noise_flow_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
     end_time = timeit.default_timer()
     print(f"Execution time: {end_time - start_time} seconds")
