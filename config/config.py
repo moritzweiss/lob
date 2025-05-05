@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd 
+
 
 # parameters from the paper 
 limit_intensities = np.array([0.2842, 0.5255, 0.2971, 0.2307, 0.0826, 0.0682, 0.0631, 0.0481, 0.0462, 0.0321, 0.0178, 0.0015, 0.0001])
@@ -29,6 +31,18 @@ noise_agent_config = {}
 noise_agent_config['market_intensity'] = market_intensity
 noise_agent_config['limit_intensities'] = limit_intensities
 noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
+
+
+# UPDATE HERE: Warning: this is actually hard-coded 
+# Load Data 
+data = pd.read_csv('order_intensities.csv')
+market_intensity = data['Limit Order Arrival Rates'].values[0]
+limit_intensities = data['Limit Order Arrival Rates'].values[1:]
+cancel_intensities = data['Normalized Cancellation Rate'].values[1:]
+noise_agent_config['limit_intensities'] = limit_intensities
+noise_agent_config['market_intensity'] = market_intensity
+noise_agent_config['cancel_intensities'] = cancel_intensities
+# END UPDATE HERE
 
 # volume related things 
 noise_agent_config['volume_distribution'] = 'half_normal'
