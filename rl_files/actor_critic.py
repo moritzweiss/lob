@@ -39,32 +39,36 @@ class Args:
     """whether to save model """
     evaluate: bool = True
     """whether to evaluate the model"""
-    n_evalutation_episodes: int = int(1e4)
+    # n_evalutation_episodes: int = int(1e4)
+    n_evalutation_episodes: int = int(1e2)
     """the number of episodes to evaluate the model"""
     run_directory: str = 'runs'
     """directory for saving models"""
 
     # Algorithm specific arguments
-    # noise, flow, strategic 
     env_type: str = "noise"
+    # noise, flow, strategic 
     """the id of the environment"""
     num_lots: int = 60
     """the number of lots"""
     terminal_time: int = 150
     """the terminal time for the execution agent"""
     time_delta: int = 15
+    # this setting leads to 10 time steps. num of lots should be divisuble by 10
     """the time delta for the execution agent"""
     # total_timesteps: int = 200*128*100
     # total_timesteps: int = 100*128*100
     # total_timesteps: int = 2*100*128
-    total_timesteps: int = 500*128*100
+    total_timesteps: int = 2*10*28
+    # total_timesteps: int = 500*128*100
     """total timesteps of the experiments"""
     learning_rate: float = 5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 128
+    num_envs: int = 28
     # num_envs: int = 1 
     """the number of parallel game environments"""
-    num_steps: int = 100
+    # num_steps: int = 100
+    num_steps: int = 10
     # less value bootstraping --> user more steps per environment 
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = False
@@ -132,7 +136,7 @@ class Agent(nn.Module):
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
-        # not sure how action_std is updated by the optimizer 
+        # standard deviations are hyper parameters, which do not depend on states
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
@@ -140,10 +144,11 @@ class Agent(nn.Module):
         # entropy is summed for each component of the action
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
-class AgentSoftmax(nn.Module):
+class AgentLogisticNormal(nn.Module):
     def __init__(self, envs):
         n_hidden_units = 128 
         super().__init__()
+        # critic network with 2 hidden layers
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
             nn.Tanh(),
@@ -151,6 +156,7 @@ class AgentSoftmax(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
         )
+        # action network with 2 hidden layers
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
             nn.Tanh(),
@@ -158,13 +164,11 @@ class AgentSoftmax(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)-1), std=1e-5),
         )
-        # custom bias in the last layer 
-        # should remove this. just set te bias to zero. check the effect of this ... 
+        # custom bias in the last layer [-1,-1, ... , -1, 1]
         x = -1.0*torch.ones(np.prod(envs.single_action_space.shape)-1)
         x[-1] = 1.0
         self.actor_mean[-1].bias.data.copy_(x)
-        # setting log standard deviations 
-        # self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)-1), requires_grad=True)
+        # variance is scaled manually during training
         self.variance = 1.0 
 
     def get_value(self, x):
@@ -172,9 +176,6 @@ class AgentSoftmax(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)        
-        # action_logstd = self.actor_logstd.expand_as(action_mean)
-        # std either as a learnable parameter or as a hyper parameter 
-        # action_std = torch.exp(action_logstd)
         action_std = torch.ones_like(action_mean)*self.variance
         probs = Normal(action_mean, action_std)
         with torch.no_grad():
@@ -288,7 +289,7 @@ if __name__ == "__main__":
     observation, info = envs.reset(seed=args.seed)
 
     # agent set up 
-    agent = AgentSoftmax(envs).to(device)
+    agent = AgentLogisticNormal(envs).to(device)
     # print(f'the agent is: {agent}')
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -474,7 +475,9 @@ if __name__ == "__main__":
         print(f'reward length: {len(episodic_returns)}')
         rewards = np.array(episodic_returns)        
         # file_name = f"{parent_dir}/rewards/{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}.npz"
-        file_name = f'{parent_dir}/rewards/{run_name}.npz'
+        # np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
+        name = f"{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_bsize_{args.batch_size}_lr_{args.learning_rate}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}"
+        file_name = f'{parent_dir}/rewards/{name}.npz'
         # file_name = run_name + '.npz'
         np.savez(file_name, rewards=rewards)
         print(f'save rewards to {file_name}')
