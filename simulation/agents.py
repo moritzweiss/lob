@@ -11,25 +11,26 @@ from config.config import noise_agent_config
 # for convolution 
 import torch 
 import scipy 
-from numba import njit
+# from numba import njit
 import bisect 
 
-@njit
-def convolve_columns_numba(arr, filter_kernel, stride=1):
-    num_rows, num_cols = arr.shape
-    filter_size = len(filter_kernel)
-    output_size = (num_rows - filter_size) // stride + 1
+# currently not used 
+# @njit
+# def convolve_columns_numba(arr, filter_kernel, stride=1):
+#     num_rows, num_cols = arr.shape
+#     filter_size = len(filter_kernel)
+#     output_size = (num_rows - filter_size) // stride + 1
     
-    convolved = np.empty((output_size, num_cols))
+#     convolved = np.empty((output_size, num_cols))
     
-    for col in range(num_cols):
-        for out_row in range(output_size):
-            acc = 0.0
-            for k in range(filter_size):
-                acc += arr[out_row * stride + k, col] * filter_kernel[k]
-            convolved[out_row, col] = acc
+#     for col in range(num_cols):
+#         for out_row in range(output_size):
+#             acc = 0.0
+#             for k in range(filter_size):
+#                 acc += arr[out_row * stride + k, col] * filter_kernel[k]
+#             convolved[out_row, col] = acc
     
-    return convolved
+#     return convolved
 
 class NoiseAgent(): 
     def __init__(self, rng, 
