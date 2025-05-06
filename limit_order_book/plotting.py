@@ -121,7 +121,7 @@ def plot_average_book_shape(bid_volumes, ask_volumes, ax, level=3, symetric=Fals
     ax.legend(loc='upper right', prop={'size': 16})
     # ax.set_xlabel('relative distance to mid price')
     # ax.set_xlabel('relative distance to mid price', fontsize=18)
-    ax.set_yticks(range(0, 26, 5))
+    # ax.set_yticks(range(0, 26, 5))
     ax.set_ylabel('Volume', fontsize=16)
     ax.set_xlabel('Ticks', fontsize=16)
     ax.tick_params(axis='x', labelsize=14)
@@ -139,7 +139,7 @@ def plot_average_book_shape(bid_volumes, ask_volumes, ax, level=3, symetric=Fals
     # xtick_labels = label1 + label2
     ax.set_xticklabels(lower_label + upper_xticks)
     # ax.set_title(title)
-    ax.set_ylim(0, 25)
+    # ax.set_ylim(0, 25)
     # ax.set_title(title, fontsize=18)
     # ax.set_title(title, fontsize=18)
     # ax.tight_layout()
