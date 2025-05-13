@@ -69,11 +69,10 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     plt.scatter(trades[trades.buy>0].time.values, level2.best_ask_price[trades.buy>0], color='black', marker='^', s= (scale/M)*trades[trades.buy>0].buy.values, label='Market buy') 
     plt.scatter(trades[trades.sell>0].time.values, level2.best_bid_price[trades.sell>0], color='black', marker='v', s= (scale/M)*trades[trades.sell>0].sell.values, label='Market sell')
     
-    plt.xlim(xlim[0], 150)
-    plt.ylim(994.5,1003.5)
-    plt.xticks(np.arange(0, 151, step=15))
-
-
+    plt.xlim(xlim[0], xlim[1])
+    plt.ylim(ylim[0],ylim[1])
+    plt.xticks(np.arange(xlim[0], xlim[1], step=15))
+    plt.xticks(rotation=45)
     
     # handles, labels = plt.gca().get_legend_handles_labels()
     # Set x and y tick size
