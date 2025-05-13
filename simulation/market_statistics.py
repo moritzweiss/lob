@@ -16,6 +16,7 @@ import seaborn as sns
 import sys
 import matplotlib.pyplot as plt
 import os 
+from limit_order_book.plotting import heat_map
 
 """
     - this code is desgigned to obtain market statistic: like mid price drift, number of trades, number of events
@@ -29,16 +30,24 @@ import os
 
 
 class Market():
-    def __init__(self, market_env='noise', seed=0):
+    def __init__(self, market_env='noise', seed=0, level=10):
+        self.level = level 
         assert market_env in ['noise', 'flow', 'strategic']
         self.agents = {}
 
-        time_delta =15 
-        terminal_time = 150
+        time_delta = 15 
+        # terminal_time = 300
+        terminal_time = 600
+
+        # override initial le1vels config 
+        initial_agent_config['n_initial_levels'] = self.level
+        noise_agent_config['level'] = self.level
 
         # initial agent setting 
         if market_env == 'noise':
-            initial_agent_config['initial_shape_file'] = 'initial_shape/noise_65.npz'
+            # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_65.npz'
+            # new initial shape file ! 
+            initial_agent_config['initial_shape_file'] = 'noise_new_config.npz'            
             initial_agent_config['start_time'] = -time_delta
             agent = InitialAgent(**initial_agent_config)
             self.agents[agent.agent_id] = agent
@@ -84,7 +93,8 @@ class Market():
     
     def reset(self):
         list_of_agents = list(self.agents.keys()) 
-        self.lob = LimitOrderBook(list_of_agents=list_of_agents, level=30, only_volumes=False)
+        # set the right level !!
+        self.lob = LimitOrderBook(list_of_agents=list_of_agents, level=self.level, only_volumes=False)
         for agent_id in list_of_agents:
             self.agents[agent_id].reset()            
         # if 'strategic_agent' in self.agents:
@@ -123,8 +133,8 @@ class Market():
         return time, n_events, drift, trades, buy_orders, sell_orders
 
 
-def rollout(seed, num_episodes, market_type):
-    M = Market(market_env=market_type, seed=seed)
+def rollout(seed, num_episodes, market_type, level=10):
+    M = Market(market_env=market_type, seed=seed, level=level)
     n_events = []
     drifts = []
     times = []
@@ -145,7 +155,6 @@ def rollout(seed, num_episodes, market_type):
 
 def mp_rollout(n_samples, n_cpus, market_type):
     """
-        - TODO: do this with joblib
     """
     samples_per_env = int(n_samples/n_cpus) 
     with Pool(n_cpus) as p:
@@ -160,70 +169,99 @@ def mp_rollout(n_samples, n_cpus, market_type):
     return n_events, drifts, times, trades, buys, sells 
 
 
-
-
 if __name__ == '__main__':
-    ## test 
-    out = rollout(seed=0, num_episodes=10, market_type='noise')
-    print(out)
-    # out = mp_rollout(n_samples=100, n_cpus=10, market_type='flow')
-    # print(out)
-    # 
-    # envs = ['noise', 'flow', 'strategic']
-    envs = ['noise', 'flow']
-    # n_samples = 1000
-    n_samples = 1000
-    # n_cpus = 80
-    n_cpus = 128
-    results = {f'n_events': [],'drift_mean': [], 'drift_std': [], 'trades': [], 'trades_std': [], 'buy_orders': [], 'sell_orders': []} 
-    data_drifts = {}
-    data_for_trade_plot = {}
-    start_time = time.time()
-    for env in envs:
-        n_events, drifts, times, trades, buys, sells = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, market_type=env)
-        data_drifts[env] = drifts
-        data_for_trade_plot[env] = trades
-        results[f'n_events'].append(np.mean(n_events))
-        results[f'drift_mean'].append(np.mean(drifts))
-        results[f'drift_std'].append(np.std(drifts))
-        results[f'trades'].append(np.mean(trades))
-        results[f'trades_std'].append(np.std(trades))
-        results[f'buy_orders'].append(np.mean(buys))
-        results[f'sell_orders'].append(np.mean(sells))
+    # create heat map plot here 
+    max_level = 10 
+    market_type = 'noise'
+    seed = 1 
+    do_heat_map = False
+    if do_heat_map:
+        M = Market(market_env=market_type, seed=seed)
+        M.reset()
+        M.run()
+        level2, orders, market_orders = M.lob.log_to_df()
+        heat_map(trades=market_orders, level2=level2, event_times=level2.time, max_level=7, scale=1000, max_volume=40, width=0.75*16, height=0.75*9, ylim=[996,1003], xlim=[0, 300])
+        plt.tight_layout()
+        plt.savefig(f'plots/heat_map_seed_{seed}.pdf')
+
+    # only using levels is a speed up 
+    num_episodes = 1
+    start_time = time.time()                
+    # note that the level aspect has very limited impact on the speed of the simulation. maybe a one second difference 
+    # 5 levels: 15 seconds 
+    # 10 levels: 16 seconds 
+    # note: not really a big difference
+    out = rollout(seed=0, num_episodes=num_episodes, market_type='noise', level=5)
     end_time = time.time()
-    execution_time = end_time - start_time
-    print("Execution time:", execution_time, "seconds")
+    print(f"Execution time for {num_episodes} episodes:", end_time - start_time, "seconds")
+    # print(out)
+    # out = mp_rollout(n_samples=100, n_cpus=10, market_type='flow')
+    # print(out
+    do_mp_rollout = True
+    if do_mp_rollout:
+        # envs = ['noise', 'flow', 'strategic']
+        # envs = ['noise', 'flow']
+        envs = ['noise']
+        # n_samples = 1000
+        # n_samples = 1000
+        n_samples = 256
+        # n_cpus = 80
+        # n_cpus = 128
+        # takes about 16 seconds with 64 CPUs 
+        n_cpus = 64
+        results = {f'n_events': [],'drift_mean': [], 'drift_std': [], 'trades': [], 'trades_std': [], 'buy_orders': [], 'sell_orders': []} 
+        data_drifts = {}
+        data_for_trade_plot = {}
+        start_time = time.time()
+        for env in envs:
+            start_time = time.time()
+            n_events, drifts, times, trades, buys, sells = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, market_type=env)
+            end_time = time.time()
+            print(f"Execution time for {n_samples} in parallel with {n_cpus} CPUS:", end_time - start_time, "seconds")
+            data_drifts[env] = drifts
+            data_for_trade_plot[env] = trades
+            results[f'n_events'].append(np.mean(n_events))
+            results[f'drift_mean'].append(np.mean(drifts))
+            results[f'drift_std'].append(np.std(drifts))
+            results[f'trades'].append(np.mean(trades))
+            results[f'trades_std'].append(np.std(trades))
+            results[f'buy_orders'].append(np.mean(buys))
+            results[f'sell_orders'].append(np.mean(sells))
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print("Execution time:", execution_time, "seconds")
 
-    # process results 
-    results = pd.DataFrame.from_dict(results).round(2)
-    results.index = envs 
-    print(results)
-    # results.to_csv(f'results/market_stats_std8.csv')
+        # process results 
+        results = pd.DataFrame.from_dict(results).round(2)
+        results.index = envs 
+        print(results)
+        # results.to_csv(f'results/market_stats_std8.csv')
 
-    # histogram of drifts 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    colors = ['blue', 'green']
-    bins = np.arange(-4.25, 5.75, 0.5)
-    ax.hist([data_drifts['noise'], data_drifts['flow']], bins, density=False, histtype='bar', color=colors, label=['Noise', 'Flow'], rwidth=0.8)
-    ax.set_xticks(np.arange(-4, 4.5, 0.5))
-    ax.tick_params(axis='x', labelsize=7)
-    ax.legend(prop={'size': 10})
-    ax.set_title('Mid Price Drift', fontsize=12)
-    plt.grid(True)
-    plt.xlim(-4, 4)
-    # plt.tight_layout()
-    plt.savefig('plots/mid_price_drift_std2_150.pdf')
-    plt.figure(figsize=(10, 6))
+        # histogram of drifts 
+        fig, ax = plt.subplots(figsize=(10, 6))
+        # colors = ['blue', 'green']
+        colors = ['blue']
+        bins = np.arange(-4.25, 5.75, 0.5)
+        ax.hist(data_drifts['noise'], bins, density=False, histtype='bar', color=colors, label=['Noise', 'Flow'], rwidth=0.8)
+        ax.set_xticks(np.arange(-4, 4.5, 0.5))
+        ax.tick_params(axis='x', labelsize=7)
+        ax.legend(prop={'size': 10})
+        ax.set_title('Mid Price Drift', fontsize=12)
+        plt.grid(True)
+        plt.xlim(-4, 4)
+        # plt.tight_layout()
+        plt.savefig('plots/mid_price_drift_new_config.pdf')
+        plt.figure(figsize=(10, 6))
 
 
-    # plot histogram of trades for each market type
-    plt.figure(figsize=(10, 6))
-    sns.kdeplot(data_for_trade_plot['noise'], fill=False, label='Noise', clip=(0, 150))
-    sns.kdeplot(data_for_trade_plot['flow'], fill=False, label='Flow',  clip=(0, 150))
-    plt.legend(fontsize=12)
-    plt.xlim(0, 140)
-    plt.grid(True)
-    plt.title('Number of Trades', fontsize=16)
-    plt.ylabel('Frequency')
-    # plt.tight_layout()
-    plt.savefig('plots/kde_trades_std2_150.pdf')
+        # plot histogram of trades for each market type
+        plt.figure(figsize=(10, 6))
+        sns.kdeplot(data_for_trade_plot['noise'], fill=False, label='Noise')
+        # sns.kdeplot(data_for_trade_plot['flow'], fill=False, label='Flow',  clip=(0, 150))
+        plt.legend(fontsize=12)
+        # plt.xlim(0, 140)
+        plt.grid(True)
+        plt.title('Number of Trades', fontsize=16)
+        plt.ylabel('Frequency')
+        # plt.tight_layout()
+        plt.savefig('plots/kde_trades_std2_150.pdf')
