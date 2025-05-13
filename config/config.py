@@ -1,5 +1,8 @@
 import numpy as np
 import pandas as pd 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # parameters from the paper 
@@ -33,7 +36,7 @@ noise_agent_config['limit_intensities'] = limit_intensities
 noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
 
 
-# UPDATE HERE: Warning: this is actually hard-coded 
+# UPDATE HERE: those are hard coded new intensity values. 
 # Load Data 
 data = pd.read_csv('order_intensities.csv')
 market_intensity = data['Limit Order Arrival Rates'].values[0]
@@ -54,15 +57,19 @@ noise_agent_config['cancel_intensities'] = cancel_intensities[:10]
 # END UPDATE HERE
 
 # volume related things 
+# new volume distribution: half normal starting at 1 with sigma = 1 
+# inreasing std adds more volatility to the simulation 
+# we should probably fit a mixture distribution to the data
+std = 2
 noise_agent_config['volume_distribution'] = 'half_normal'
 noise_agent_config['market_mean'] = 0
-noise_agent_config['market_std'] = 2
+noise_agent_config['market_std'] = std
 noise_agent_config['limit_mean'] = 0
-noise_agent_config['limit_std'] = 2
+noise_agent_config['limit_std'] = std
 noise_agent_config['cancel_mean'] = 0
-noise_agent_config['cancel_std'] = 2
+noise_agent_config['cancel_std'] = std
 noise_agent_config['volume_min'] = 1
-noise_agent_config['volume_max'] = 20
+noise_agent_config['volume_max'] = 10
 noise_agent_config['unit_volume'] = False
 noise_agent_config['level'] = 30 
 noise_agent_config['fall_back_volume'] = 5
