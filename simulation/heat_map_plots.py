@@ -1,3 +1,4 @@
+# when running jupyter notebook somehow the kernel does not find the modules in the parent directory
 # computing heat map plots ! 
 #%%
 import os 
@@ -13,7 +14,7 @@ from simulation.market_gym import Market
 # %%
 seed = 2 
 
-config = {'seed': seed, 'market_env': 'noise', 'execution_agent': 'linear_sl_agent', 'volume':int(11*5), 'terminal_time': 165, 'time_delta': 15}
+config = {'seed': seed, 'market_env': 'noise', 'execution_agent': 'linear_sl_agent', 'volume':int(10), 'terminal_time': 150, 'time_delta': 15}
 M = Market(config)
 total_rewards = []
 times = []
@@ -31,8 +32,6 @@ heat_map(trades=market_orders, level2=level2, event_times=level2.time, max_level
 
 plt.tight_layout()
 plt.savefig(f'plots/heat_map_seed_{seed}.pdf')
-
-
 
 
 # %%
