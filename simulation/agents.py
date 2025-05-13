@@ -87,10 +87,17 @@ class NoiseAgent():
         assert self.initial_level >= self.level, 'initial level must be bigger than level'
         self.initial_bid = initial_bid
         self.initial_ask = initial_ask
-                
-        assert self.level >= 10, 'level must be at least 10'
-        self.limit_intensities = np.pad(limit_intensities, (0,self.level-len(limit_intensities)), 'constant', constant_values=(0))
-        self.cancel_intensities = np.pad(cancel_intensities, (0,self.level-len(cancel_intensities)), 'constant', constant_values=(0))
+        
+        # does this have impact anywhere ? 
+        assert self.level >= 5, 'level must be at least 5'                
+        if self.level > len(limit_intensities):
+            self.limit_intensities = np.pad(limit_intensities, (0, self.level - len(limit_intensities)), 'constant', constant_values=(0))
+        else:
+            self.limit_intensities = limit_intensities[:self.level]
+        if self.level > len(cancel_intensities):
+            self.cancel_intensities = np.pad(cancel_intensities, (0, self.level - len(cancel_intensities)), 'constant', constant_values=(0))
+        else:   
+            self.cancel_intensities = cancel_intensities[:self.level]
         self.market_intensity = market_intensity
 
         # volume distribution. could seperate this out into another class 
