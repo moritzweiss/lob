@@ -35,20 +35,20 @@ noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
 
 # UPDATE HERE: Warning: this is actually hard-coded 
 # Load Data 
-data = pd.read_csv('order_intensities.csv')
-market_intensity = data['Limit Order Arrival Rates'].values[0]
-limit_intensities = data['Limit Order Arrival Rates'].values[1:]
+# data = pd.read_csv('order_intensities.csv')
+# market_intensity = data['Limit Order Arrival Rates'].values[0]
+# limit_intensities = data['Limit Order Arrival Rates'].values[1:]
 # cancel_intensities = data['Normalized Cancellation Rate'].values[1:]
 # multiply with 100 
 # there are too few values avove the 10th level. we just ignore them. they cause wired behaviour.  
 # there is some wired behaviour in the data at levels 7 and 8. fixing it here. 
-cancel_intensities = data['Normalized Cancellation Rate'].values[1:]*100
-limit_intensities[8] = limit_intensities[7]
-noise_agent_config['limit_intensities'] = limit_intensities[:10]
+# cancel_intensities = data['Normalized Cancellation Rate'].values[1:]*100
+# limit_intensities[8] = limit_intensities[7]
+# noise_agent_config['limit_intensities'] = limit_intensities[:10]
 # print('Limit Order Arrival Rates:', limit_intensities[:10])
-noise_agent_config['market_intensity'] = market_intensity
-cancel_intensities[8] = cancel_intensities[7]
-noise_agent_config['cancel_intensities'] = cancel_intensities[:10]
+# noise_agent_config['market_intensity'] = market_intensity
+# cancel_intensities[8] = cancel_intensities[7]
+# noise_agent_config['cancel_intensities'] = cancel_intensities[:10]
 # print('cancel_intensities:', cancel_intensities[:10])
 # print('Limit Order Arrival Rates:', limit_intensities[:10])
 # END UPDATE HERE
