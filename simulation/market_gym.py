@@ -153,6 +153,13 @@ class Market(gym.Env):
             # vectorized environments are only used in RL training 
             self.observation_space = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
             self.action_space = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
+        
+        # this is a bit hacky. adding a property to transform actions to the simplex space (this is mainly used for the multivariate normal distributions)
+        if 'transform_action' in config:
+            assert config['transform_action'] == True, 'transform_action should be True if contained in the config'                        
+            self.transform_action = True
+        else:
+            self.transform_action = False
 
         return None 
 
@@ -185,6 +192,9 @@ class Market(gym.Env):
     def transition(self, action=None):
         terminated = False
         transition_reward = 0 
+        if action is not None:
+            if self.transform_action:
+                action = np.exp(action) / np.sum(np.exp(action))
         # n_events = 0  
         while not self.pq.empty(): 
             # get next event from the event queue 
@@ -389,12 +399,12 @@ if __name__ == '__main__':
     #### run full parallel benchmark rollouts for all environments, lot sizes, execution agents 
     saving_directory = 'rewards'
     # n_sample should be a multiple of n_cpus
-    n_samples = 10
+    n_samples = int(1e4)
     # n_samples = 5000
-    n_cpus = 2
+    n_cpus = 64
     seed = 100
-    # envs = ['noise', 'flow', 'strategic']
-    envs = ['strategic']
+    envs = ['noise', 'flow', 'strategic']
+    # envs = ['strategic']
     n_lots = [20, 60]
     # n_lots = [10, 60]    
     agents = ['sl_agent', 'linear_sl_agent']
@@ -406,9 +416,7 @@ if __name__ == '__main__':
                 print(f'env: {env}, lots: {lots}, agent: {agent}')
                 start_time = time.time()
                 rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed, terminal_time=150, time_delta=15)
-                # rewards are saved in the rewards folder with name 
-                # rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz
-                np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
+                np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_eval_seed_{seed}_{agent}.npz', rewards=rewards)
                 end_time = time.time()
                 execution_time = end_time - start_time
                 print("Execution time:", execution_time)
