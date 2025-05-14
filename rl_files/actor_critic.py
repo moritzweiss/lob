@@ -21,7 +21,9 @@ from simulation.market_gym import Market
 
 @dataclass
 class Args:
-    exp_name: str = 'actor_critic'
+    # other options dirichlet, normal
+    # exp_name: str = 'log_normal'
+    exp_name: str = 'normal'
     """the name of this experiment"""
     tag: str = None
     """additional tag for the experiment"""
@@ -39,17 +41,18 @@ class Args:
     """whether to save model """
     evaluate: bool = True
     """whether to evaluate the model"""
-    # n_evalutation_episodes: int = int(1e4)
-    n_evalutation_episodes: int = int(1e2)
+    n_evalutation_episodes: int = int(1e4)
     """the number of episodes to evaluate the model"""
     run_directory: str = 'runs'
     """directory for saving models"""
+    run_name: str = None 
+    """to be filled at runtime"""
 
     # Algorithm specific arguments
     env_type: str = "noise"
     # noise, flow, strategic 
     """the id of the environment"""
-    num_lots: int = 60
+    num_lots: int = 20
     """the number of lots"""
     terminal_time: int = 150
     """the terminal time for the execution agent"""
@@ -57,18 +60,22 @@ class Args:
     # this setting leads to 10 time steps. num of lots should be divisuble by 10
     """the time delta for the execution agent"""
     # total_timesteps: int = 200*128*100
-    # total_timesteps: int = 100*128*100
-    # total_timesteps: int = 2*100*128
-    total_timesteps: int = 2*10*28
+    # total_timesteps = itertaions * n_cpus * n_steps (in each evnironment)
+    # 10 iterations is one full episode 
+    total_timesteps: int = 200*128*100
+    # debug 
+    # total_timesteps: int = 2*10
     # total_timesteps: int = 500*128*100
     """total timesteps of the experiments"""
     learning_rate: float = 5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 28
+    num_envs: int = 128
+    # num_envs: int = 1
     # num_envs: int = 1 
     """the number of parallel game environments"""
     # num_steps: int = 100
-    num_steps: int = 10
+    num_steps: int = 100
+    # num_steps: int = 10
     # less value bootstraping --> user more steps per environment 
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = False
@@ -114,6 +121,7 @@ class Agent(nn.Module):
     def __init__(self, envs):
         n_hidden_units = 128 
         super().__init__()
+        # critic network with 2 hidden layers
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
             nn.Tanh(),
@@ -121,27 +129,31 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
         )
+        # action network with 2 hidden layers
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
             nn.Tanh(),
             layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
             nn.Tanh(),
-            layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)), std=0.01),
+            # this is different than the logistic normal agent, no -1 here 
+            layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)), std=1e-5),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)), requires_grad=True)
-
+        # still use the same bias logic in the last layer [-1,-1, ... , -1, 1]
+        x = -1.0*torch.ones(np.prod(envs.single_action_space.shape))
+        x[-1] = 1.0
+        self.actor_mean[-1].bias.data.copy_(x)
+        # variance is scaled manually during training
+        self.variance = 1.0 
+        
     def get_value(self, x):
         return self.critic(x)
 
     def get_action_and_value(self, x, action=None):
-        action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        # standard deviations are hyper parameters, which do not depend on states
-        action_std = torch.exp(action_logstd)
+        action_mean = self.actor_mean(x)        
+        action_std = torch.ones_like(action_mean)*self.variance
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        # entropy is summed for each component of the action
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 class AgentLogisticNormal(nn.Module):
@@ -247,13 +259,18 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}', 'learning_rate=', args.learning_rate, 'num_iterations=', args.num_iterations, 'num_envs=', args.num_envs, 'n_evalutation_episodes=', args.n_evalutation_episodes)
 
+    # information should include: env_type, num_lots, seed, num_iterations, batch_size, algo_name
+    # algo_name should describe the name of the algorithm, like log normal, dirichlet, normal softmax 
+    # note that we are always using the actor critic algorithm, so we do not need to mention this 
+    # naming convention: 
     if args.tag:
-        run_name = f"{args.exp_name}_{args.env_type}_{args.num_lots}_seed_{args.seed}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.tag}"
+        run_name = f"{args.env_type}_{args.num_lots}_seed_{args.seed}_eval_seed_{args.eval_seed}_eval_episodes_{args.n_evalutation_episodes}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.exp_name}_{args.tag}"
     else:
-        run_name = f"{args.exp_name}_{args.env_type}_{args.num_lots}_seed_{args.seed}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}"
+        run_name = f"{args.env_type}_{args.num_lots}_seed_{args.seed}_eval_seed_{args.eval_seed}_eval_episodes_{args.n_evalutation_episodes}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.exp_name}"    
     print(f'the run name is: {run_name}')
+    args.run_name = run_name
 
-    summary_path = f"{parent_dir}/{args.run_directory}/{run_name}"
+    summary_path = f"{parent_dir}/tensorboard_logs/{run_name}"
     print(f'writing summary to {summary_path}:')
     writer = SummaryWriter(summary_path)
     writer.add_text(
@@ -283,13 +300,23 @@ if __name__ == "__main__":
 
     # environment setup
     configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.seed+s, 'terminal_time': 150, 'time_delta': 15} for s in range(args.num_envs)]
+    if args.exp_name == 'normal':
+        # if we use just normal distribution, let the environment transform actions from R^n to the simplex 
+        configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.seed+s, 'terminal_time': 150, 'time_delta': 15, 'transform_action': True} for s in range(args.num_envs)]
     env_fns = [make_env(config) for config in configs]
     envs = gym.vector.AsyncVectorEnv(env_fns=env_fns)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
     observation, info = envs.reset(seed=args.seed)
 
-    # agent set up 
-    agent = AgentLogisticNormal(envs).to(device)
+    # agent set up. we have three cases log_normal, dirichlet, and normal 
+    if args.exp_name == 'log_normal':
+        agent = AgentLogisticNormal(envs).to(device)
+    elif args.exp_name == 'dirichlet':
+        agent = DirichletAgent(envs).to(device)
+    elif args.exp_name == 'normal':
+        agent = Agent(envs).to(device)
+    else:
+        raise ValueError(f"unknown agent type: {args.exp_name}")
     # print(f'the agent is: {agent}')
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -329,7 +356,8 @@ if __name__ == "__main__":
         # keep same variance throughout the training
         # agent.variance = 1.0
         print(f'the current variance is {agent.variance}')
-
+        
+        # this is the data collection loop 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
             obs[step] = next_obs
@@ -394,6 +422,7 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
+                # log probs are computed with old actions 
                 _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
@@ -447,13 +476,14 @@ if __name__ == "__main__":
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if args.save_model:
-        model_path = f"{parent_dir}/{args.run_directory}/{run_name}/{args.exp_name}"        
+        model_path = f"{parent_dir}/models/{run_name}.pt"        
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
     
     if args.evaluate:
-        # recreate the environment 
         configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.eval_seed+s, 'terminal_time': args.terminal_time, 'time_delta': args.time_delta} for s in range(args.num_envs)]
+        if args.exp_name == 'normal':
+            configs = [{'market_env': args.env_type , 'execution_agent': 'rl_agent', 'volume': args.num_lots, 'seed': args.eval_seed+s, 'terminal_time': args.terminal_time, 'time_delta': args.time_delta, 'transform_action': True} for s in range(args.num_envs)]
         print('evalutation config:')
         print(configs[0])
         env_fns = [make_env(config) for config in configs]
@@ -474,11 +504,8 @@ if __name__ == "__main__":
         print(f'evaluation time: {time.time()-start_time}')
         print(f'reward length: {len(episodic_returns)}')
         rewards = np.array(episodic_returns)        
-        # file_name = f"{parent_dir}/rewards/{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}.npz"
-        # np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
-        name = f"{args.env_type}_{args.num_lots}_trainiter_{args.num_iterations}_bsize_{args.batch_size}_lr_{args.learning_rate}_episodes_{args.n_evalutation_episodes}_seed_{args.eval_seed}_{args.exp_name}"
-        file_name = f'{parent_dir}/rewards/{name}.npz'
-        # file_name = run_name + '.npz'
+        assert args.run_name is not None, "run_name should be set"
+        file_name = f'{parent_dir}/rewards/{args.run_name}.npz'
         np.savez(file_name, rewards=rewards)
         print(f'save rewards to {file_name}')
 
