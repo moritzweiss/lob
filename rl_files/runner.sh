@@ -24,7 +24,7 @@ declare -a ARGS=(
 
 NUM_STEPS=100
 NUM_ENVS=128 
-NUM_ITERATIONS=500
+NUM_ITERATIONS=200
 TIMESTEPS=$((NUM_ITERATIONS * $NUM_ENVS * $NUM_STEPS))
 echo "time steps: "
 echo $TIMESTEPS
@@ -43,17 +43,8 @@ do
   echo "#####" 
   echo "STARTING A RUN"  
   echo "Running $PYTHON_SCRIPT with arguments: $ARG1 $ARG2"
-  python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$((TIMESTEPS))" --num_envs "$((NUM_ENVS))" --num_steps "$((NUM_STEPS))" --n_evalutation_episodes "100" 
+  python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$((TIMESTEPS))" --num_envs "$((NUM_ENVS))" --num_steps "$((NUM_STEPS))" --n_evalutation_episodes "$((NUM_EVALUATION_EPISODES))" --exp_name "log_normal" 
 done
-
-#   # Run the script and log output
-#   python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$TIMESTEPS" --num_envs "128" --num_steps "100" --n_evalutation_episodes "10000" --tag "best_price_new" >> script_output.log 2>&1
-
-#   # Check if the last command succeeded
-#   if [ $? -ne 0 ]; then
-#     echo "Error: Execution failed for args $ARG1 $ARG2. Check script_output.log for details."
-#   fi
-# done
 
 
 echo "All processes completed."
