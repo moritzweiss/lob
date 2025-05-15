@@ -2,6 +2,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from typing import Optional
 import gymnasium as gym
 import numpy as np
 import torch
@@ -23,10 +24,9 @@ from simulation.market_gym import Market
 class Args:
     # other options dirichlet, normal
     # exp_name: str = 'log_normal'
-    exp_name: str = 'normal'
-    """the name of this experiment"""
-    tag: str = None
-    """additional tag for the experiment"""
+    exp_name: str = 'dirichlet'
+    tag: Optional[str] = None
+    """additional tag for the experiment, should be string type"""
     seed: int = 0
     """seed of the experiment"""
     eval_seed: int = 100
@@ -35,18 +35,16 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    wandb_entity: str = None
-    """the entity (team) of wandb's project"""
     save_model: bool = True
     """whether to save model """
     evaluate: bool = True
     """whether to evaluate the model"""
-    n_evalutation_episodes: int = int(1e4)
+    n_eval_episodes: int = int(1e4)
     """the number of episodes to evaluate the model"""
     run_directory: str = 'runs'
     """directory for saving models"""
-    run_name: str = None 
-    """to be filled at runtime"""
+    run_name:  Optional[str] = None 
+    """to be filled at runtime, should be string type"""
 
     # Algorithm specific arguments
     env_type: str = "noise"
@@ -222,12 +220,12 @@ class DirichletAgent(nn.Module):
             # the last term scales the weights ! 
             layer_init(nn.Linear(n_hidden_units, np.prod(envs.single_action_space.shape)), std=1e-5, bias_const=np.log(np.exp(1)-1)),
         )
-        self.actor_var_scale = nn.Parameter(torch.tensor(-1.0), requires_grad=True)
+        # self.actor_var_scale = nn.Parameter(torch.tensor(-1.0), requires_grad=True)
         # self.actor_var_scale = 1e-1
     
     def get_action_and_value(self, state, action=None): 
         mean = torch.nn.functional.softplus(self.actor_mean(state))  
-        scale = torch.nn.functional.softplus(self.actor_var_scale) + 1e-5
+        # scale = torch.nn.functional.softplus(self.actor_var_scale) + 1e-5
         # scale = 1e-5
         if torch.isnan(state).any():
             print("State contains NaN", state)
@@ -236,11 +234,11 @@ class DirichletAgent(nn.Module):
         # if torch.isnan(scale).any():
         #     print("Scale contains NaNs:", scale)
         # scale =x 1e-5
-        concentrations = mean*scale 
+        # concentrations = mean*scale 
         # concentrations = mean
         # concentrations = mean*sclae
         # probs = Dirichlet(mean)
-        probs = Dirichlet(concentrations)
+        probs = Dirichlet(mean)
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.variance, self.critic(state)
@@ -257,16 +255,16 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}', 'learning_rate=', args.learning_rate, 'num_iterations=', args.num_iterations, 'num_envs=', args.num_envs, 'n_evalutation_episodes=', args.n_evalutation_episodes)
+    print(f'batch_size={args.batch_size}, minibatch_size={args.minibatch_size}, num_iterations={args.num_iterations}, learning_rate={args.learning_rate}, num_iterations={args.num_iterations}, num_envs={args.num_envs}, num_steps_per_env={args.num_steps}, n_evalutation_episodes={args.n_eval_episodes}')
 
     # information should include: env_type, num_lots, seed, num_iterations, batch_size, algo_name
     # algo_name should describe the name of the algorithm, like log normal, dirichlet, normal softmax 
     # note that we are always using the actor critic algorithm, so we do not need to mention this 
     # naming convention: 
     if args.tag:
-        run_name = f"{args.env_type}_{args.num_lots}_seed_{args.seed}_eval_seed_{args.eval_seed}_eval_episodes_{args.n_evalutation_episodes}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.exp_name}_{args.tag}"
+        run_name = f"{args.env_type}_{args.num_lots}_seed_{args.seed}_eval_seed_{args.eval_seed}_eval_episodes_{args.n_eval_episodes}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.exp_name}_{args.tag}"
     else:
-        run_name = f"{args.env_type}_{args.num_lots}_seed_{args.seed}_eval_seed_{args.eval_seed}_eval_episodes_{args.n_evalutation_episodes}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.exp_name}"    
+        run_name = f"{args.env_type}_{args.num_lots}_seed_{args.seed}_eval_seed_{args.eval_seed}_eval_episodes_{args.n_eval_episodes}_num_iterations_{args.num_iterations}_bsize_{args.batch_size}_{args.exp_name}"    
     print(f'the run name is: {run_name}')
     args.run_name = run_name
 
@@ -317,6 +315,7 @@ if __name__ == "__main__":
         agent = Agent(envs).to(device)
     else:
         raise ValueError(f"unknown agent type: {args.exp_name}")
+    print(f'the agent type is: {args.exp_name}')
     # print(f'the agent is: {agent}')
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -348,14 +347,16 @@ if __name__ == "__main__":
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
-            print(f' the lerning rate is {lrnow}')
-        
+            print(f' the lerning rate is {lrnow}')        
         # manual standard deviation scalig. updated this to 0.1
-        agent.variance = (0.32-1)*(iteration)/(args.num_iterations-1) + 1
+        if args.exp_name == 'log_normal' or args.exp_name == 'normal':
+            agent.variance = (0.32-1)*(iteration)/(args.num_iterations-1) + 1        
+        # dirichlet agent does not use variance scaling 
         # agent.variance = 1 - iteration/(args.num_iterations+1) + 5e-1
         # keep same variance throughout the training
         # agent.variance = 1.0
-        print(f'the current variance is {agent.variance}')
+        # if args.exp_name == 'normal' or args.exp_name == 'log_normal':            
+            # print(f'the current variance is {agent.variance}')
         
         # this is the data collection loop 
         for step in range(0, args.num_steps):
@@ -471,7 +472,8 @@ if __name__ == "__main__":
         writer.add_scalar("losses/total_loss", loss, global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        writer.add_scalar("values/variance", agent.variance, global_step)
+        if args.exp_name == 'log_normal' or args.exp_name == 'normal':
+            writer.add_scalar("values/variance", agent.variance, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
@@ -492,7 +494,7 @@ if __name__ == "__main__":
         obs, _ = envs.reset()
         episodic_returns = []
         start_time = time.time()
-        while len(episodic_returns) < args.n_evalutation_episodes:
+        while len(episodic_returns) < args.n_eval_episodes:
             with torch.no_grad():
                 actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
                 next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
