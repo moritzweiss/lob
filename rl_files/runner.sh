@@ -24,27 +24,38 @@ declare -a ARGS=(
 
 NUM_STEPS=100
 NUM_ENVS=128 
-NUM_ITERATIONS=200
+NUM_ITERATIONS=400
 TIMESTEPS=$((NUM_ITERATIONS * $NUM_ENVS * $NUM_STEPS))
 echo "time steps: "
 echo $TIMESTEPS
+echo "num steps: "
+echo $NUM_STEPS
+echo "num envs: "
+echo $NUM_ENVS
+echo "num iterations: "
+echo $NUM_ITERATIONS
 
 NUM_EVALUATION_EPISODES=10000
+# NUM_EVALUATION_EPISODES=10
 echo "num evaluation episodes: "
 echo $NUM_EVALUATION_EPISODES
 
-for args in "${ARGS[@]}"
+for exp_name in "log_normal" "dirichlet"; 
+# normal distribution performs more or less the same as dirichlet. therefore we are ignoring the normal distribution for the moment 
+do
+for args in "${ARGS[@]}"; 
 do
   set -- $args 
   ARG1=$1
   ARG2=$2
 
-  echo "######"
+  echo "#####"
   echo "#####" 
   echo "STARTING A RUN"  
-  echo "Running $PYTHON_SCRIPT with arguments: $ARG1 $ARG2"
-  python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$((TIMESTEPS))" --num_envs "$((NUM_ENVS))" --num_steps "$((NUM_STEPS))" --n_evalutation_episodes "$((NUM_EVALUATION_EPISODES))" --exp_name "log_normal" 
+  echo "Running experiment: $exp_name with $ARG1 $ARG2"
+  python3 "$PYTHON_SCRIPT" --env_type "$ARG1" --num_lots "$ARG2" --total_timesteps "$((TIMESTEPS))" --num_envs "$((NUM_ENVS))" --num_steps "$((NUM_STEPS))" --n_eval_episodes "$((NUM_EVALUATION_EPISODES))" --exp_name "$exp_name" 
 done
+done 
 
 
 echo "All processes completed."
