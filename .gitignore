@@ -20,7 +20,7 @@ rewards/*
 data_new.npz
 data.npz 
 new_plots/*
-notebooks/* 
+# notebooks/* 
 runs
 runs/*
 raw_rewards/*
