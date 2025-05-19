@@ -401,7 +401,7 @@ if __name__ == '__main__':
     # n_sample should be a multiple of n_cpus
     n_samples = int(1e4)
     # n_samples = 5000
-    n_cpus = 64
+    n_cpus = 128
     seed = 100
     envs = ['noise', 'flow', 'strategic']
     # envs = ['strategic']
