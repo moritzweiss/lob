@@ -432,7 +432,9 @@ class ExecutionAgent():
 
     def get_reward(self, cash, volume):        
         assert self.reference_bid_price is not None, 'reference bid price is not set'
-        return (cash - volume * self.reference_bid_price) / self.initial_volume
+        # do not normalize rewards here 
+        # return (cash - volume * self.reference_bid_price) / self.initial_volume
+        return cash 
     
     def update_position_from_message_list(self, message_list):
         rewards = [self.update_position(m) for m in message_list]                
