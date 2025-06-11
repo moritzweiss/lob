@@ -13,9 +13,17 @@ if [[ ! -f "$PYTHON_SCRIPT" ]]; then
   exit 1
 fi
 
-declare -a ARGS=(
-  "noise 20"
-  "noise 60"
+# declare -a ARGS=(
+#   "noise 20"
+#   "noise 60"
+#   "flow 20"
+#   "flow 60"
+#   "strategic 20"
+#   "strategic 60"
+# )
+
+# ignore noise case 
+declare -a ARGS=(  
   "flow 20"
   "flow 60"
   "strategic 20"
