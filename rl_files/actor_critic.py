@@ -23,9 +23,10 @@ from simulation.market_gym import Market
 @dataclass
 class Args:
     # other options dirichlet, normal
-    # exp_name: str = 'log_normal'
-    exp_name: str = 'dirichlet'
-    tag: Optional[str] = None
+    exp_name: str = 'log_normal'
+    # exp_name: str = 'dirichlet'
+    # tag: Optional[str] = None
+    tag: Optional[str] = 'qfunction'
     """additional tag for the experiment, should be string type"""
     seed: int = 0
     """seed of the experiment"""
@@ -40,6 +41,7 @@ class Args:
     evaluate: bool = True
     """whether to evaluate the model"""
     n_eval_episodes: int = int(1e4)
+    n_eval_episodes: int = int(1e2)
     """the number of episodes to evaluate the model"""
     run_directory: str = 'runs'
     """directory for saving models"""
@@ -60,19 +62,20 @@ class Args:
     # total_timesteps: int = 200*128*100
     # total_timesteps = itertaions * n_cpus * n_steps (in each evnironment)
     # 10 iterations is one full episode 
-    total_timesteps: int = 200*128*100
+    # total_timesteps: int = 200*128*100
+    total_timesteps: int = 10*2*50
     # debug 
     # total_timesteps: int = 2*10
     # total_timesteps: int = 500*128*100
     """total timesteps of the experiments"""
     learning_rate: float = 5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 128
-    # num_envs: int = 1
+    # num_envs: int = 128
+    num_envs: int = 2
     # num_envs: int = 1 
     """the number of parallel game environments"""
     # num_steps: int = 100
-    num_steps: int = 100
+    num_steps: int = 50
     # num_steps: int = 10
     # less value bootstraping --> user more steps per environment 
     """the number of steps to run in each environment per policy rollout"""
@@ -166,6 +169,17 @@ class AgentLogisticNormal(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
         )
+
+        # q function network 
+        self.q_function = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod()+np.array(envs.single_action_space.shape).prod(), n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, n_hidden_units)),
+            nn.Tanh(),
+            layer_init(nn.Linear(n_hidden_units, 1), std=1.0),
+        )
+
+
         # action network with 2 hidden layers
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), n_hidden_units)),
@@ -199,7 +213,7 @@ class AgentLogisticNormal(nn.Module):
                 # use inverse logistic transform to get the base action v = h^{-1}(a)
                 last_component = action[:,-1].reshape(-1,1)
                 base_action = torch.log(action[:,:-1]/last_component)
-        return action, probs.log_prob(base_action).sum(1), probs.entropy().sum(1), self.critic(x)
+        return action, probs.log_prob(base_action).sum(1), probs.entropy().sum(1), self.critic(x), self.q_function(torch.cat((x, action), dim=1))
 
 class DirichletAgent(nn.Module):
     def __init__(self, envs):         
@@ -326,6 +340,7 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    qvalues = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
     # start the simulation 
     global_step = 0
@@ -366,8 +381,9 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
+                action, logprob, _, value, qvalue = agent.get_action_and_value(next_obs)
                 values[step] = value.flatten()
+                qvalues[step] = qvalue.flatten()
             actions[step] = action
             logprobs[step] = logprob
 
@@ -404,6 +420,8 @@ if __name__ == "__main__":
                 delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
                 advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
             returns = advantages + values
+            # redefine the advantages
+            advantages = qvalues - values
 
         # flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
@@ -412,6 +430,7 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        b_qvalues = qvalues.reshape(-1)
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
@@ -424,7 +443,7 @@ if __name__ == "__main__":
                 mb_inds = b_inds[start:end]
 
                 # log probs are computed with old actions 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                _, newlogprob, entropy, newvalue, newqvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -450,11 +469,12 @@ if __name__ == "__main__":
                     v_loss = 0.5 * v_loss_max.mean()
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                    q_loss = 0.5 * ((newqvalue - b_qvalues[mb_inds]) ** 2).mean()
 
                 # does args.vf_coef need to be tuned ? 
                 # could add entropy loss here 
                 entropy_loss = entropy.mean()
-                loss = pg_loss  + v_loss * args.vf_coef
+                loss = pg_loss  + v_loss * args.vf_coef + q_loss * args.vf_coef 
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -496,7 +516,7 @@ if __name__ == "__main__":
         start_time = time.time()
         while len(episodic_returns) < args.n_eval_episodes:
             with torch.no_grad():
-                actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
+                actions, _, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
                 next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
             if "final_info" in infos:
                 for info in infos["final_info"]:
