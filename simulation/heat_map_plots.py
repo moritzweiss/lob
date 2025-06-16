@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from simulation.market_gym import Market
 
 # %%
-seed = 2 
+seed = 1
 
 config = {'seed': seed, 'market_env': 'noise', 'execution_agent': 'linear_sl_agent', 'volume':int(10), 'terminal_time': 150, 'time_delta': 15}
 M = Market(config)
@@ -28,10 +28,10 @@ level2, orders, market_orders = M.lob.log_to_df()
 textwidth = 16
 textheight = 9
 scale=0.75
-heat_map(trades=market_orders, level2=level2, event_times=level2.time, max_level=7, scale=1750, max_volume=40, width=scale*textwidth, height=scale*textheight)
+heat_map(trades=market_orders, level2=level2, event_times=level2.time, max_level=7, scale=500, max_volume=40, width=scale*textwidth, height=scale*textheight)
 
 plt.tight_layout()
-plt.savefig(f'plots/heat_map_seed_{seed}.pdf')
+plt.savefig(f'plots/heat_map_seed_{seed}.pdf', dpi=100, bbox_inches='tight')
 
 
 # %%
