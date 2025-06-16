@@ -21,7 +21,7 @@ from queue import PriorityQueue
 
 
 def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_factor=1, 
-                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, total_trades_window=1000, level=30):
+                  imbalance=False, imbalance_factor=3, shape_file=None, frequency=1000, total_trades_window=4000, level=30):
 
     ''''
     computes some statistics like average bid and ask volumes, mid price changes, and total trades over a sliding window of size totol_trades_window
@@ -36,11 +36,10 @@ def get_statistics(n_steps=1, rng=default_rng(0), initial_shape=50, damping_fact
     noise_agent_config['imbalance_reaction'] = imbalance
     noise_agent_config['imbalance_factor'] = imbalance_factor
     noise_agent_config['rng'] = rng    
-    noise_agent_config['unit_volume'] = True
+    noise_agent_config['unit_volume'] = False
     noise_agent_config['terminal_time'] = np.inf 
     noise_agent_config['fall_back_volume'] = initial_shape
     noise_agent_config['level'] = level 
-
     
     if shape_file is not None:
         noise_agent_config['initial_shape_file'] = shape_file
@@ -176,23 +175,49 @@ if __name__ == '__main__':
 
     ## compute book shapes 
     damping_factor = 65
-    n_samples = int(1e8)
+    n_samples = int(1e7)
     # n_samples = int(1e3)
     start_time = timeit.default_timer()
     n_cpus = 50
-    # n_cpus = 1 
+    # n_cpus = 1 †
     total_trades_window = 100
-    initial_shape=10
+    initial_shape=5
     print(f'number of cpus: {n_cpus}, number of samples: {n_samples}, damping factor: {damping_factor}, total_trades_window: {total_trades_window}, initial_shape: {initial_shape}')
     print(f'samples per cpu: {int(n_samples/n_cpus)}')  
-    if False:        
-        bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = get_statistics(n_steps=int(1e2), rng=default_rng(0), initial_shape=initial_shape, damping_factor=0.65, imbalance=False, frequency=10, total_trades_window=total_trades_window)
-    if True:
-        bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, initial_shape=initial_shape, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=total_trades_window)
-        fig, axs = plt.subplots(figsize=(10, 6))
-        plot_average_book_shape(bidv, askv, level=20, file_name=f'noise', title='noise', ax=axs, symetric=True)
-        fig.tight_layout()
-        fig.savefig(f'plots/shape_noise_new.pdf', dpi=350)
+    
+    # testing get_statistics() function  
+    # bid_volumes, ask_volumes, midp_diff, midp, trades, average_time_step = get_statistics(n_steps=int(1e2), rng=default_rng(0), initial_shape=initial_shape, damping_factor=0.65, imbalance=False, frequency=10, total_trades_window=total_trades_window)
+    
+    # compute average book shapes 
+    bidv, askv, midp_diff, trades, average_time_step = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, initial_shape=initial_shape, damping_factor=damping_factor/100, imbalance=False, frequency=100, total_trades_window=total_trades_window)
+    np.savez(f'initial_shape/noise.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
+
+    # fig and axs objects 
+    fig, axs = plt.subplots(figsize=(10, 6))
+
+    plot_average_book_shape(bidv, askv, level=20, file_name=f'noise', title='noise', ax=axs, symetric=True)
+    fig.tight_layout()
+    fig.savefig(f'plots/shape_noise_new_config.pdf', dpi=350)
+    # midp_diff are computet every 1000 steps 
+    plt.figure(figsize=(10, 6))
+    sns.histplot(midp_diff, bins=50, kde=True)
+    plt.xlabel('Mid Price Change')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of Mid Price Changes')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('plots/midp_diff_histogram.pdf', dpi=350)
+
+    # trades histogram, trades are also comuted every 1000 steps
+    plt.figure(figsize=(10, 6))
+    sns.histplot(trades, bins=50, kde=True)
+    plt.xlabel('Number of Trades')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of Number of Trades')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('plots/trades_histogram.pdf', dpi=350)
+
 
     # saving: 
     # np.savez(f'initial_shape/noise_{damping_factor}.npz', bidv=np.nanmean(bidv, axis=0), askv=np.nanmean(askv, axis=0))
