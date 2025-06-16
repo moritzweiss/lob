@@ -55,7 +55,7 @@ def heat_map(trades, level2, event_times, max_level=30, scale=1000, max_volume=1
     # max_volume = 1000
 
     # width, height 
-    plt.figure(figsize=(width, height), dpi=300)
+    plt.figure(figsize=(width, height), dpi=100)
 
     plt.scatter(extended_time, prices, c=volumes, cmap=cm.bwr, vmin=-max_volume, vmax=max_volume, s=150, label='_nolegend_')
     # plt.scatter(extended_time, prices, c=volumes, cmap=cm.seismic, vmin=-max_volume, vmax=max_volume, s=150, label='_nolegend_', alpha=1.0)
