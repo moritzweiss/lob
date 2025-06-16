@@ -5,11 +5,11 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-# parameters from the paper 
+###### parameters from the paper 
 limit_intensities = np.array([0.2842, 0.5255, 0.2971, 0.2307, 0.0826, 0.0682, 0.0631, 0.0481, 0.0462, 0.0321, 0.0178, 0.0015, 0.0001])
 market_intensity = 0.1237
 cancel_intensities = np.array([0.8636, 0.4635, 0.1487, 0.1096, 0.0402, 0.0341, 0.0311, 0.0237, 0.0233, 0.0178, 0.0127, 0.0012, 0.0001])
-base ={}
+base = {}
 base['limit_intensities'] = limit_intensities
 base['market_intensities'] = market_intensity
 base['cancel_intensities'] = 1e-3*cancel_intensities
@@ -35,31 +35,37 @@ noise_agent_config['market_intensity'] = market_intensity
 noise_agent_config['limit_intensities'] = limit_intensities
 noise_agent_config['cancel_intensities'] = 1e-1*cancel_intensities
 
+###############
 
-# UPDATE HERE: those are hard coded new intensity values. 
+##### Update starts here: those are hard coded new intensity values. 
 # Load Data 
 data = pd.read_csv('order_intensities.csv')
+
+# number of levels to place on each side of the book 
+NLEVELS = 10  # number of levels in the book
+
+# market orders 
 market_intensity = data['Limit Order Arrival Rates'].values[0]
-limit_intensities = data['Limit Order Arrival Rates'].values[1:]
-# cancel_intensities = data['Normalized Cancellation Rate'].values[1:]
-# multiply with 100 
-# there are too few values avove the 10th level. we just ignore them. they cause wired behaviour.  
-# there is some wired behaviour in the data at levels 7 and 8. fixing it here. 
-cancel_intensities = data['Normalized Cancellation Rate'].values[1:]*100
-limit_intensities[8] = limit_intensities[7]
-noise_agent_config['limit_intensities'] = limit_intensities[:10]
-# print('Limit Order Arrival Rates:', limit_intensities[:10])
+# market_intensity = market_intensity * 2  
+market_intensity = market_intensity 
+# scale them up by a factor of 2. creates more volatility. works a bit better than increasing std. 
 noise_agent_config['market_intensity'] = market_intensity
+
+# limit orders 
+limit_intensities = data['Limit Order Arrival Rates'].values[1:]
+limit_intensities[8] = limit_intensities[7]
+limit_intensities[9] = limit_intensities[7]
+noise_agent_config['limit_intensities'] = limit_intensities[:NLEVELS]
+
+# cancel orders 
+cancel_intensities = data['Normalized Cancellation Rate'].values[1:]*100
 cancel_intensities[8] = cancel_intensities[7]
-noise_agent_config['cancel_intensities'] = cancel_intensities[:10]
-# print('cancel_intensities:', cancel_intensities[:10])
-# print('Limit Order Arrival Rates:', limit_intensities[:10])
-# END UPDATE HERE
+cancel_intensities[9] = cancel_intensities[7]
+noise_agent_config['cancel_intensities'] = cancel_intensities[:NLEVELS]
 
 # volume related things 
-# new volume distribution: half normal starting at 1 with sigma = 1 
-# inreasing std adds more volatility to the simulation 
-# we should probably fit a mixture distribution to the data
+# inreasing this leads to more vola 
+# heat map plot starts to loook funky if std is too high 
 std = 2
 noise_agent_config['volume_distribution'] = 'half_normal'
 noise_agent_config['market_mean'] = 0
@@ -77,20 +83,18 @@ noise_agent_config['fall_back_volume'] = 5
 # noise agent config 
 noise_agent_config['initial_shape'] = None
 noise_agent_config['initial_shape_file'] = None 
-# imbalance related stuff 
+
+# imbalance  
 noise_agent_config['damping_factor'] = 0.65
 noise_agent_config['imbalance_reaction'] = False
 noise_agent_config['imbalance_factor'] = 2.0
 noise_agent_config['default_waiting_time'] = 1e-6
 noise_agent_config['intensity_scaling'] = 0.85
 
-# 
+# other 
 noise_agent_config['rng'] = np.random.default_rng(0)
-# 
 noise_agent_config['initial_bid'] = 1000
 noise_agent_config['initial_ask'] = 1001
-
-# 
 noise_agent_config['start_time'] = -15
 noise_agent_config['terminal_time'] = None
 noise_agent_config['priority'] = 1
@@ -123,9 +127,7 @@ rl_agent_config['terminal_time'] = None
 rl_agent_config['start_time'] = 0
 rl_agent_config['time_delta'] = 500
 rl_agent_config['priority'] = 0
-# rl_agent_config['action_book_levels'] = 4 
 rl_agent_config['action_book_levels'] = 5 
-# rl_agent_config['observation_book_levels'] = 6
 rl_agent_config['observation_book_levels'] = 5
 rl_agent_config['initial_shape_file'] = None 
 
@@ -149,11 +151,10 @@ initial_agent_config['initial_shape'] = None
 initial_agent_config['initial_shape_file'] = None
 initial_agent_config['priority'] = -2
 
-# 
+# observational config 
 observation_agent_config = {}
 observation_agent_config['priority'] = -1
 observation_agent_config['agent_id'] = 'observation_agent'
 observation_agent_config['start_time'] = 0
 observation_agent_config['terminal_time'] = 135
 observation_agent_config['time_delta'] = 15
-
