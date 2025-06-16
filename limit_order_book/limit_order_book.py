@@ -404,7 +404,8 @@ class LimitOrderBook:
         # prices = list(self.price_map[side].keys())
         for price in prices: 
             # cp = counterparty             
-            cp_order_ids = deepcopy(self.price_map[side][price])
+            # cp_order_ids = deepcopy(self.price_map[side][price])
+            cp_order_ids = list(self.price_map[side][price])  # make a copy of the order ids to avoid modifying the original list while iterating
             for cp_order_id in cp_order_ids:
                 cp_order = self.order_map[cp_order_id]
                 cp_agent_id = cp_order.agent_id
