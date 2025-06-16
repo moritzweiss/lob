@@ -30,3 +30,5 @@ runs_t200_std2/*
 cleanrl 
 latex_tables/*
 legacy_code/train/*
+tensorboard_logs/*
+tensorboard_logs
