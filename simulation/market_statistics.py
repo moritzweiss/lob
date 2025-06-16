@@ -35,9 +35,9 @@ class Market():
         assert market_env in ['noise', 'flow', 'strategic']
         self.agents = {}
 
+        # terminal_time = 600
         time_delta = 15 
-        # terminal_time = 300
-        terminal_time = 600
+        terminal_time = 300
 
         # override initial le1vels config 
         initial_agent_config['n_initial_levels'] = self.level
@@ -47,7 +47,7 @@ class Market():
         if market_env == 'noise':
             # initial_agent_config['initial_shape_file'] = 'initial_shape/noise_65.npz'
             # new initial shape file ! 
-            initial_agent_config['initial_shape_file'] = 'noise_new_config.npz'            
+            initial_agent_config['initial_shape_file'] = 'initial_shape/noise.npz'            
             initial_agent_config['start_time'] = -time_delta
             agent = InitialAgent(**initial_agent_config)
             self.agents[agent.agent_id] = agent
@@ -206,9 +206,9 @@ if __name__ == '__main__':
         # n_samples = 1000
         n_samples = 256
         # n_cpus = 80
-        # n_cpus = 128
+        n_cpus = 256
         # takes about 16 seconds with 64 CPUs 
-        n_cpus = 64
+        # n_cpus = 64
         results = {f'n_events': [],'drift_mean': [], 'drift_std': [], 'trades': [], 'trades_std': [], 'buy_orders': [], 'sell_orders': []} 
         data_drifts = {}
         data_for_trade_plot = {}
@@ -264,4 +264,4 @@ if __name__ == '__main__':
         plt.title('Number of Trades', fontsize=16)
         plt.ylabel('Frequency')
         # plt.tight_layout()
-        plt.savefig('plots/kde_trades_std2_150.pdf')
+        plt.savefig('plots/kde_trades.pdf')
