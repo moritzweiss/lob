@@ -387,53 +387,59 @@ def mp_rollout(n_samples, n_cpus, execution_agent, market_type, volume, seed, te
 if __name__ == '__main__':
     
     #### run full parallel benchmark rollouts for all environments, lot sizes, execution agents 
-    saving_directory = 'rewards'
-    # n_sample should be a multiple of n_cpus
-    n_samples = 10
-    # n_samples = 5000
-    n_cpus = 2
-    seed = 100
-    # envs = ['noise', 'flow', 'strategic']
-    envs = ['strategic']
-    n_lots = [20, 60]
-    # n_lots = [10, 60]    
-    agents = ['sl_agent', 'linear_sl_agent']
-    # agents = ['linear_sl_agent']
-
-    for env in envs:
-        for lots in n_lots:
-            for agent in agents:
-                print(f'env: {env}, lots: {lots}, agent: {agent}')
-                start_time = time.time()
-                rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed, terminal_time=150, time_delta=15)
-                # rewards are saved in the rewards folder with name 
-                # rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz
-                np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
-                end_time = time.time()
-                execution_time = end_time - start_time
-                print("Execution time:", execution_time)
-                print(f'mean rewards: {np.mean(rewards)}')
-                print(f'length of rewards: {len(rewards)}')
-    
-    #### run rollouts  
-    # n_samples = 3
-    # # n_cpus = 5
-    # # agent = 'linear_sl_agent'
-    # agent = 'sl_agent'
-    # # agent = 'rl_agent'
-    # env = 'strategic'
-    # # env = 'noice'
-    # # env = 'flow'
-    # lots = 10
+    # saving_directory = 'rewards'
+    # # n_sample should be a multiple of n_cpus
+    # n_samples = 10
+    # # n_samples = 5000
+    # n_cpus = 2
     # seed = 100
-    # # rollout 
-    # start_time = time.time()
-    # rewards, times, n_events = rollout(seed=0, n_episodes=n_samples, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
-    # end_time = time.time()
-    # execution_time = end_time - start_time
-    # print("Execution time:", execution_time)
-    # print(f'rewards: {rewards}')
-    # print(f'times: {times}')
+    # # envs = ['noise', 'flow', 'strategic']
+    # envs = ['strategic']
+    # n_lots = [20, 60]
+    # # n_lots = [10, 60]    
+    # agents = ['sl_agent', 'linear_sl_agent']
+    # # agents = ['linear_sl_agent']
+
+    # for env in envs:
+    #     for lots in n_lots:
+    #         for agent in agents:
+    #             print(f'env: {env}, lots: {lots}, agent: {agent}')
+    #             start_time = time.time()
+    #             rewards, times, n_events = mp_rollout(n_samples=n_samples, n_cpus=n_cpus, execution_agent=agent, market_type=env, volume=lots, seed=seed, terminal_time=150, time_delta=15)
+    #             # rewards are saved in the rewards folder with name 
+    #             # rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz
+    #             np.savez(f'rewards/{env}_{lots}_episodes_{n_samples}_seed_{seed}_{agent}.npz', rewards=rewards)
+    #             end_time = time.time()
+    #             execution_time = end_time - start_time
+    #             print("Execution time:", execution_time)
+    #             print(f'mean rewards: {np.mean(rewards)}')
+    #             print(f'length of rewards: {len(rewards)}')
+    
+    #### run rollouts on a single core 
+    import cProfile, pstats
+    prof = cProfile.Profile()
+    prof.enable()
+    n_samples = 100
+    # n_cpus = 5
+    # agent = 'linear_sl_agent'
+    agent = 'sl_agent'
+    # agent = 'rl_agent'
+    env = 'strategic'
+    # env = 'noice'
+    # env = 'flow'
+    lots = 10
+    seed = 100
+    # rollout 
+    start_time = time.time()
+    rewards, times, n_events = rollout(seed=0, n_episodes=n_samples, execution_agent=agent, market_type=env, volume=lots, terminal_time=150, time_delta=15)
+    prof.disable()
+    stats = pstats.Stats(prof).sort_stats('cumtime')
+    stats.print_stats()
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print("Execution time:", execution_time)
+    print(f"rewards: {rewards}")
+    print(f"times: {times}")
 
     # rollout benchmark with multiprocessing 
     # start_time = time.time()
