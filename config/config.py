@@ -65,7 +65,9 @@ noise_agent_config['cancel_intensities'] = cancel_intensities[:NLEVELS]
 
 # volume related things 
 # inreasing this leads to more vola 
-# heat map plot starts to loook funky if std is too high 
+# heat map plot starts to loook funky if std is too high. prices become too eratic. bid and aks prices are not stable 
+
+
 std = 2
 noise_agent_config['volume_distribution'] = 'half_normal'
 noise_agent_config['market_mean'] = 0
