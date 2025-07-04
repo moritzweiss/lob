@@ -413,6 +413,49 @@ class NoiseAgent():
         self.n_events = 0
         pass 
 
+class MarketMakingAgent():
+    def __init__(self, nlots: int, agent_id: str, priority: int = 0) -> None: 
+        ''''
+        Base class for market making agent 
+        Parameters:
+        ----
+        nlots: int
+            number of lots the agent places in the book
+        agent_id: str
+            id of the agent
+        priority: int
+            priority of the agent, used for event scheduling
+        '''
+        self.total_orders = nlots
+        self.agent_id = agent_id
+        self.priority = priority
+        self.reset()
+
+    def reset(self):
+        self.active_orders = 0
+        self.cummulative_reward = 0
+        self.limit_buy_orders = 0
+        self.limit_sell_orders = 0
+    
+    def get_reward(self, cash: float, price: float = np.nan):
+        '''
+        cash: cash generated: cash from sell orders - cash from buy orders  
+        price: price of the asset at beginning of the interval                  
+        '''
+        return cash/self.total_lots
+        # normalized version 
+        # return cash / (self.total_lots * price) 
+    
+    def update_position_from_message_list(self, message_list):
+        rewards = [self.update_position(m) for m in message_list]
+        assert self.active_lots >= 0
+        assert self.total_lots >= 0
+        return sum(rewards)
+    
+    def update_position(self, fill_message):
+        
+
+
 class ExecutionAgent():
     """
     Base class for execution agents.
@@ -1190,3 +1233,4 @@ class ObservationAgent():
             return (time+self.time_delta, self.priority, self.agent_id)
         else:
             return None
+
